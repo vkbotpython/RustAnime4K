@@ -16,7 +16,7 @@ jobs:
         os: [windows-latest, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux system deps
         if: runner.os == 'Linux'
@@ -39,7 +39,7 @@ jobs:
     name: check --features video (ubuntu)
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux system deps
         run: |
@@ -65,7 +65,7 @@ jobs:
         os: [windows-latest, ubuntu-22.04]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux system deps
         if: runner.os == 'Linux'
@@ -101,7 +101,7 @@ jobs:
           cp assets/favicon.ico packaging/linux/*.desktop README.md LICENSE dist/anime-player/
           tar -czf anime-player-linux-x86_64.tar.gz -C dist anime-player
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: anime-player-${{ runner.os }}
           path: |
