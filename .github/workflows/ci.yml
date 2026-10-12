@@ -33,6 +33,9 @@ jobs:
 
       - run: cargo fmt --all -- --check
       - run: cargo clippy --all-targets -- -D warnings
+      # `check` needs no link-time libmpv, so this also runs on Windows.
+      - run: cargo check --features video
+      - run: cargo clippy --all-targets --features video -- -D warnings
       - run: cargo test
 
   video-feature:

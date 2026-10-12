@@ -89,8 +89,8 @@ Source: "{#SrcDir}\assets\shaders\*"; DestDir: "{app}\shaders"; Flags: ignorever
 Source: "{#SrcDir}\assets\images\*"; DestDir: "{app}\images"; Flags: ignoreversion recursesubdirs
 Source: "{#SrcDir}\assets\docs\*"; DestDir: "{app}\docs"; Flags: ignoreversion
 Source: "{#SrcDir}\assets\favicon.ico"; DestDir: "{app}"; Flags: ignoreversion
-; libmpv for --features video builds (ship separately, same as the Python releases)
-Source: "{#SrcDir}\target\release\mpv.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+; libmpv for --features video builds (bundled by CI, see release.yml)
+Source: "{#SrcDir}\target\release\libmpv-2.dll"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Registry]
 Root: HKA; Subkey: "Software\Classes\Applications\{#MyAppExeName}"; ValueType: string; ValueName: "FriendlyAppName"; ValueData: "{#MyAppName}"; Flags: uninsdeletekey

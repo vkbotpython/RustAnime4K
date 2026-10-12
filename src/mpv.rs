@@ -286,6 +286,8 @@ impl LibMpv {
             init.set_option("terminal", "yes")?;
             // Render API mode: frames go to our egui surface (see video.rs).
             init.set_option("vo", "libmpv")?;
+            // Hardware decoding with software fallback.
+            init.set_option("hwdec", "auto-safe")?;
             Ok(())
         })?;
         Ok(Self {
