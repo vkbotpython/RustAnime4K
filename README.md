@@ -1,9 +1,11 @@
 # Anime Player (Rust)
 
+Author of the Rust port: **avencores**.
+
 Video player with hand-drawn image upscaling via the high-performance
 [Anime4K](https://github.com/bloc97/Anime4K) algorithm — a complete Rust port
 of [Communist02/AnimePlayer](https://github.com/Communist02/AnimePlayer)
-(Python + PySide6 + python-mpv).
+(Python + PySide6 + python-mpv, original author Denis Mazur).
 
 The legacy Python tree (`AnimePlayer/`, git-ignored) is kept only as a
 behavioral reference and will be removed once the port reaches parity.

@@ -2,6 +2,7 @@
 name = "anime-player"
 version = "1.0.0"
 edition = "2021"
+authors = ["avencores"]
 description = "Video player with Anime4K image upscaling (Rust port of AnimePlayer)"
 license = "GPL-3.0-or-later"
 

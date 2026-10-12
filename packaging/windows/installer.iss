@@ -5,7 +5,7 @@
 
 #define MyAppName "Anime Player"
 #define MyAppVersion "1.0.0"
-#define MyAppPublisher "Denis Mazur"
+#define MyAppPublisher "avencores"
 #define MyAppURL "https://github.com/Communist02/AnimePlayer"
 #define MyAppExeName "anime-player.exe"
 #define MyAppAssocName MyAppName + " File"
