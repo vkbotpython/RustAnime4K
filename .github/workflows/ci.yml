@@ -1,0 +1,109 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  lint-test:
+    name: fmt + clippy + test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libgl1-mesa-dev \
+            libmpv-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+
+  video-feature:
+    name: check --features video (ubuntu)
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libgl1-mesa-dev \
+            libmpv-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - run: cargo check --features video
+      - run: cargo clippy --all-targets --features video -- -D warnings
+      - run: cargo test --features video
+
+  build-release:
+    name: release build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-22.04]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libgl1-mesa-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo build --release
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/anime-player | Out-Null
+          Copy-Item target/release/anime-player.exe dist/anime-player/
+          Copy-Item assets/shaders dist/anime-player/shaders -Recurse
+          Copy-Item assets/images dist/anime-player/images -Recurse
+          Copy-Item assets/docs dist/anime-player/docs -Recurse
+          Copy-Item assets/favicon.ico dist/anime-player/
+          Copy-Item README.md, LICENSE dist/anime-player/
+          Compress-Archive -Path dist/anime-player -DestinationPath anime-player-windows-x86_64.zip
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/anime-player
+          cp target/release/anime-player dist/anime-player/
+          cp -r assets/shaders assets/images assets/docs dist/anime-player/
+          cp assets/favicon.ico packaging/linux/*.desktop README.md LICENSE dist/anime-player/
+          tar -czf anime-player-linux-x86_64.tar.gz -C dist anime-player
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: anime-player-${{ runner.os }}
+          path: |
+            anime-player-windows-x86_64.zip
+            anime-player-linux-x86_64.tar.gz

@@ -1,0 +1,75 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: build + publish (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            archive: anime-player-windows-x86_64.zip
+          - os: ubuntu-22.04
+            archive: anime-player-linux-x86_64.tar.gz
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux system deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libgl1-mesa-dev
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: cargo build --release
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/anime-player | Out-Null
+          Copy-Item target/release/anime-player.exe dist/anime-player/
+          Copy-Item assets/shaders dist/anime-player/shaders -Recurse
+          Copy-Item assets/images dist/anime-player/images -Recurse
+          Copy-Item assets/docs dist/anime-player/docs -Recurse
+          Copy-Item assets/favicon.ico dist/anime-player/
+          Copy-Item README.md, LICENSE dist/anime-player/
+          Compress-Archive -Path dist/anime-player -DestinationPath ${{ matrix.archive }}
+
+      - name: Inno Setup installer (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe' packaging/windows/installer.iss
+          Move-Item packaging/windows/Output/*.exe dist/ -Force
+
+      - name: Package (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p dist/anime-player
+          cp target/release/anime-player dist/anime-player/
+          cp -r assets/shaders assets/images assets/docs dist/anime-player/
+          cp assets/favicon.ico packaging/linux/*.desktop README.md LICENSE dist/anime-player/
+          tar -czf ${{ matrix.archive }} -C dist anime-player
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ matrix.archive }}
+            dist/*.exe

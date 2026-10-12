@@ -1,0 +1,40 @@
+[package]
+name = "anime-player"
+version = "2.3.3"
+edition = "2021"
+description = "Video player with Anime4K image upscaling (Rust port of AnimePlayer)"
+license = "GPL-3.0-or-later"
+
+[[bin]]
+name = "anime-player"
+path = "src/main.rs"
+
+[features]
+default = []
+# Real video playback via libmpv. Requires libmpv on the system at build time
+# (Linux: apt install libmpv-dev; Windows: mpv dev files) and at runtime
+# (libmpv.so / mpv-2.dll next to the binary). Without this feature the app
+# builds and runs with a placeholder video surface (logic/UI fully testable).
+# NOTE: the render-context video widget (egui + libmpv OpenGL, same approach
+# as the old QOpenGLWidget/Video class) is the next milestone; with `video`
+# enabled today you get real audio + full property control (incl. Anime4K
+# glsl-shaders) with a placeholder surface.
+video = ["dep:libmpv2"]
+
+[dependencies]
+eframe = { version = "0.35", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui = "0.35"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dirs = "6"
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+sys-locale = "0.3"
+libmpv2 = { version = "6", optional = true }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+opt-level = 3
+strip = true

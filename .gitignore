@@ -9,11 +9,16 @@ target/
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
 
-# RustRover
-#  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
-#  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
-#  and can be added to the global gitignore or merged into this file.  For a more nuclear
-#  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+# Logs and local packaging output
+*.log
+dist/
+packaging/windows/Output/
 
+# Legacy Python reference tree (behavioral reference only, will be removed
+# once the Rust port reaches parity)
 AnimePlayer/
+
+# Editors
+.idea/
+*.swp
+*.swo
