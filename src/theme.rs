@@ -77,10 +77,7 @@ impl ColorScheme {
         match self {
             Self::Dark => true,
             Self::Light => false,
-            Self::System => match dark_light::detect() {
-                dark_light::Mode::Light => false,
-                _ => true,
-            },
+            Self::System => !matches!(dark_light::detect(), dark_light::Mode::Light),
         }
     }
 }
