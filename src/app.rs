@@ -257,7 +257,9 @@ impl AnimePlayerApp {
             )
             .to_string(),
             settings_scheme: ColorScheme::from_name(
-                get_str(&config, "colorScheme").as_deref().unwrap_or("System"),
+                get_str(&config, "colorScheme")
+                    .as_deref()
+                    .unwrap_or("System"),
             ),
             config,
             last_mouse_pos: None,
@@ -351,8 +353,7 @@ impl AnimePlayerApp {
     /// Copies saved config into the settings drafts and opens the dialog
     /// (mirrors constructing a fresh `SettingsWindow` each time).
     fn open_settings(&mut self) {
-        self.settings_lang =
-            Lang::from_config_value(get_str(&self.config, "language").as_deref());
+        self.settings_lang = Lang::from_config_value(get_str(&self.config, "language").as_deref());
         self.settings_open_last = get_bool(&self.config, "onOpenLastFile", true);
         self.settings_pos_last = get_bool(&self.config, "onPosLastFile", true);
         self.settings_volume_plus = get_bool(&self.config, "volumePlus", false);
@@ -364,10 +365,14 @@ impl AnimePlayerApp {
             .and_then(Value::as_f64)
             .unwrap_or(0.0);
         self.settings_palette = Palette::from_name(
-            get_str(&self.config, "palette").as_deref().unwrap_or("System"),
+            get_str(&self.config, "palette")
+                .as_deref()
+                .unwrap_or("System"),
         );
         self.settings_style = crate::theme::style::normalize(
-            get_str(&self.config, "style").as_deref().unwrap_or("default"),
+            get_str(&self.config, "style")
+                .as_deref()
+                .unwrap_or("default"),
         )
         .to_string();
         self.settings_scheme = ColorScheme::from_name(
@@ -715,9 +720,7 @@ impl AnimePlayerApp {
                 let link = path.to_string_lossy().into_owned();
                 self.do_open_url(ctx, &link);
                 break;
-            } else if crate::formats::is_subtitles_file(&path.to_string_lossy())
-                && path.is_file()
-            {
+            } else if crate::formats::is_subtitles_file(&path.to_string_lossy()) && path.is_file() {
                 self.mpv.add_sub_file(&path.to_string_lossy());
             } else if path.is_file() {
                 if first_new {
@@ -955,8 +958,7 @@ impl AnimePlayerApp {
             let resp = egui::CentralPanel::default()
                 .show(ui, |ui| {
                     let available = ui.available_size();
-                    let (rect, resp) =
-                        ui.allocate_exact_size(available, egui::Sense::click());
+                    let (rect, resp) = ui.allocate_exact_size(available, egui::Sense::click());
                     ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
                     if let Some(renderer) = self.video.as_mut() {
                         renderer.show(ui, rect);
@@ -977,8 +979,7 @@ impl AnimePlayerApp {
             // double click = fullscreen.
             use egui::PointerButton;
             let fullscreen_click = resp.double_clicked_by(PointerButton::Primary);
-            let play_click =
-                !fullscreen_click && resp.clicked_by(PointerButton::Primary);
+            let play_click = !fullscreen_click && resp.clicked_by(PointerButton::Primary);
             resp.context_menu(|ui| {
                 self.context_menu(ui);
             });
@@ -1082,7 +1083,11 @@ impl AnimePlayerApp {
                 } else {
                     self.t("Play")
                 };
-                if ui.button(if playing { "⏸" } else { "▶" }).on_hover_text(play_tip).clicked() {
+                if ui
+                    .button(if playing { "⏸" } else { "▶" })
+                    .on_hover_text(play_tip)
+                    .clicked()
+                {
                     self.toggle_play();
                 }
                 if ui.button("⏭").on_hover_text(self.t("Next file")).clicked() {
@@ -1093,7 +1098,11 @@ impl AnimePlayerApp {
                     let ctx = ui.ctx().clone();
                     self.toggle_fullscreen(&ctx);
                 }
-                if ui.button("🎵").on_hover_text(self.t("Soundtrack")).clicked() {
+                if ui
+                    .button("🎵")
+                    .on_hover_text(self.t("Soundtrack"))
+                    .clicked()
+                {
                     self.show_audio_menu = !self.show_audio_menu;
                     self.show_sub_menu = false;
                 }
@@ -1110,9 +1119,7 @@ impl AnimePlayerApp {
                 let max = (duration * TIME_SCALE).max(1.0);
                 let mut slider_val = pos * TIME_SCALE;
                 let resp = ui
-                    .add(
-                        egui::Slider::new(&mut slider_val, 0.0..=max).show_value(false),
-                    )
+                    .add(egui::Slider::new(&mut slider_val, 0.0..=max).show_value(false))
                     .on_hover_text(format!("{} / {}", fmt_time(pos), fmt_time(duration)));
                 if resp.changed() {
                     self.mpv.set_time_pos(slider_val / TIME_SCALE);
@@ -1446,8 +1453,7 @@ impl AnimePlayerApp {
             .set("soundOffset", json!(self.settings_sound_offset));
         self.config
             .set("palette", json!(self.settings_palette.name()));
-        self.config
-            .set("style", json!(self.settings_style.clone()));
+        self.config.set("style", json!(self.settings_style.clone()));
         self.config
             .set("colorScheme", json!(self.settings_scheme.name()));
         let lang_value = self.settings_lang.config_value().to_string();
@@ -1752,8 +1758,7 @@ impl AnimePlayerApp {
                 });
             });
         if cancelled {
-            self.launch_params_text =
-                get_str(&self.config, "launchParameters").unwrap_or_default();
+            self.launch_params_text = get_str(&self.config, "launchParameters").unwrap_or_default();
             open = false;
         }
         if saved {
