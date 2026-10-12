@@ -8,8 +8,6 @@ of [Communist02/AnimePlayer](https://github.com/Communist02/AnimePlayer)
 The legacy Python tree (`AnimePlayer/`, git-ignored) is kept only as a
 behavioral reference and will be removed once the port reaches parity.
 
-![status](https://github.com/Communist02/AnimePlayer/actions/workflows/ci.yml/badge.svg)
-
 ## Features (parity with 2.3.3)
 
 - Open file / URL / folder, playlist, drag & drop (subtitle files auto-attach)
