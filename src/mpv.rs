@@ -90,6 +90,12 @@ pub trait MpvBackend: Send + Sync {
     fn add_sub_file(&self, path: &str);
     fn add_audio_file(&self, path: &str);
     fn mpv_version(&self) -> String;
+    /// True when playback reached end-of-file (for auto-advance).
+    /// Mirrors polling `eof-reached` (the Python build relies on libmpv
+    /// idle/end-file events for the same purpose).
+    fn eof_reached(&self) -> bool {
+        false
+    }
     /// Raw libmpv handle for the GPU render context (`video` feature).
     /// Returns `None` for backends without libmpv (mock).
     #[cfg(feature = "video")]
@@ -110,6 +116,7 @@ struct MockState {
     pub video_zoom: f64,
     pub glsl_shaders: String,
     pub screenshots: u32,
+    pub eof_reached: bool,
     pub options: Vec<(String, String)>,
 }
 
@@ -140,6 +147,12 @@ impl MockMpv {
     #[cfg(test)]
     pub fn glsl_shaders(&self) -> String {
         self.state.lock().unwrap().glsl_shaders.clone()
+    }
+
+    /// Test helper: force `eof_reached` for auto-advance tests.
+    #[cfg(test)]
+    pub fn set_eof(&self, eof: bool) {
+        self.state.lock().unwrap().eof_reached = eof;
     }
 }
 
@@ -215,10 +228,16 @@ impl MpvBackend for MockMpv {
                 .push(("input-ipc-server".to_string(), "mpvpipe".to_string()));
             s.options
                 .push(("hwdec".to_string(), "auto-copy".to_string()));
+            s.options
+                .push(("hwdec-codecs".to_string(), "all".to_string()));
+            s.options
+                .push(("hr-seek-framedrop".to_string(), "false".to_string()));
         } else {
             s.options
                 .push(("input-ipc-server".to_string(), String::new()));
             s.options.push(("hwdec".to_string(), "auto".to_string()));
+            s.options
+                .push(("hr-seek-framedrop".to_string(), "true".to_string()));
         }
     }
     fn set_option_str(&self, name: &str, value: &str) {
@@ -260,6 +279,9 @@ impl MpvBackend for MockMpv {
     fn mpv_version(&self) -> String {
         "mpv (mock)".to_string()
     }
+    fn eof_reached(&self) -> bool {
+        self.state.lock().unwrap().eof_reached
+    }
 }
 
 /// Real libmpv backend, available with `--features video`.
@@ -284,6 +306,9 @@ impl LibMpv {
             init.set_option("keep-open", "yes")?;
             init.set_option("profile", "gpu-hq")?;
             init.set_option("terminal", "yes")?;
+            // URL playback (mirrors python-mpv `ytdl=True`); ignore the error
+            // on builds without youtube-dl support so init still succeeds.
+            let _ = init.set_option("ytdl", "yes");
             // Render API mode: frames go to our egui surface (see video.rs).
             init.set_option("vo", "libmpv")?;
             // Hardware decoding with software fallback.
@@ -468,6 +493,9 @@ impl MpvBackend for LibMpv {
         self.get_opt::<String>("mpv-version")
             .unwrap_or_else(|| "mpv".to_string())
     }
+    fn eof_reached(&self) -> bool {
+        self.get_opt::<bool>("eof-reached").unwrap_or(false)
+    }
 
     #[cfg(feature = "video")]
     fn mpv_handle(&self) -> Option<std::sync::Arc<libmpv2::Mpv>> {
@@ -528,5 +556,13 @@ mod tests {
         assert_eq!(mpv.glsl_shaders(), "a.glsl:b.glsl");
         mpv.set_svp(true);
         mpv.screenshot();
+    }
+
+    #[test]
+    fn mock_eof_flag() {
+        let mpv = MockMpv::new();
+        assert!(!mpv.eof_reached());
+        mpv.set_eof(true);
+        assert!(mpv.eof_reached());
     }
 }

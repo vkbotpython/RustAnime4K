@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
 
@@ -16,7 +16,7 @@ use crate::formats::{AUDIO_FORMATS, SUBTITLES_FORMATS, VIDEO_FORMATS};
 use crate::i18n::{self, Lang};
 use crate::mpv::{MpvBackend, TrackKind};
 use crate::player::{PlayerState, MIN_RESTORE_POSITION};
-use crate::theme::{self, Palette};
+use crate::theme::{self, ColorScheme, Palette};
 #[cfg(feature = "video")]
 use crate::video::VideoRenderer;
 
@@ -25,13 +25,29 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Slider granularity, mirrors `TIME_SCALE = 10`.
 pub const TIME_SCALE: f64 = 10.0;
 
+/// Idle delay before the cursor auto-hides in fullscreen.
+/// (Qt original hides after ~4x100ms ticks; 2s is usable on desktop.)
+const FULLSCREEN_CURSOR_IDLE: Duration = Duration::from_millis(2000);
+/// Bottom strip (px) that reveals the control panel in fullscreen.
+const FULLSCREEN_BOTTOM_ZONE: f32 = 140.0;
+/// Right strip (px) that reveals the playlist in fullscreen.
+const FULLSCREEN_RIGHT_ZONE: f32 = 120.0;
+
 const SPEEDS: &[f64] = &[
     0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0,
 ];
 
-fn mmss(secs: f64) -> String {
+/// `MM:SS`, or `HH:MM:SS` for videos >= 1h (mirrors `divmod` formatting).
+fn fmt_time(secs: f64) -> String {
     let total = secs.max(0.0) as u64;
-    format!("{:02}:{:02}", total / 60, total % 60)
+    let h = total / 3600;
+    let m = (total % 3600) / 60;
+    let s = total % 60;
+    if h > 0 {
+        format!("{h:02}:{m:02}:{s:02}")
+    } else {
+        format!("{m:02}:{s:02}")
+    }
 }
 
 fn shaders_dir() -> PathBuf {
@@ -71,6 +87,38 @@ fn get_str(cfg: &ConfigManager, key: &str) -> Option<String> {
 
 fn get_bool(cfg: &ConfigManager, key: &str, default: bool) -> bool {
     cfg.get(key).and_then(Value::as_bool).unwrap_or(default)
+}
+
+/// Reads the system clipboard (for the `Paste` buttons, mirroring
+/// `QGuiApplication.clipboard().text()`). Returns empty string on failure.
+fn read_clipboard_text() -> String {
+    arboard::Clipboard::new()
+        .and_then(|mut cb| cb.get_text())
+        .unwrap_or_default()
+}
+
+fn is_symlink(path: &Path) -> bool {
+    std::fs::symlink_metadata(path)
+        .map(|m| m.file_type().is_symlink())
+        .unwrap_or(false)
+}
+
+fn is_url_like(s: &str) -> bool {
+    s.contains("://")
+}
+
+/// Display name for the window title / playlist, mirrors
+/// `filenames_only` (`basename` for files, part after `/` for URLs).
+fn display_name_of(path_str: &str) -> String {
+    if is_url_like(path_str) {
+        path_str.rsplit('/').next().unwrap_or(path_str).to_string()
+    } else {
+        Path::new(path_str)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or(path_str)
+            .to_string()
+    }
 }
 
 /// Native "open media file" dialog with video/audio filters.
@@ -136,6 +184,12 @@ pub struct AnimePlayerApp {
     settings_fixed_panel: bool,
     settings_sound_offset: f64,
     settings_palette: Palette,
+    settings_style: String,
+    settings_scheme: ColorScheme,
+
+    // Fullscreen mouse tracking (mirrors mouseMoveEvent/update_cursor).
+    last_mouse_pos: Option<egui::Pos2>,
+    last_mouse_time: Instant,
 }
 
 impl AnimePlayerApp {
@@ -198,10 +252,21 @@ impl AnimePlayerApp {
             settings_palette: Palette::from_name(
                 get_str(&config, "palette").as_deref().unwrap_or("System"),
             ),
+            settings_style: crate::theme::style::normalize(
+                get_str(&config, "style").as_deref().unwrap_or("default"),
+            )
+            .to_string(),
+            settings_scheme: ColorScheme::from_name(
+                get_str(&config, "colorScheme").as_deref().unwrap_or("System"),
+            ),
             config,
+            last_mouse_pos: None,
+            last_mouse_time: Instant::now(),
         };
+        app.apply_style(&cc.egui_ctx);
         app.apply_theme(&cc.egui_ctx);
         app.restore_startup(cli_arg);
+        app.refresh_title(&cc.egui_ctx);
         app
     }
 
@@ -210,9 +275,285 @@ impl AnimePlayerApp {
     }
 
     fn apply_theme(&self, ctx: &egui::Context) {
-        // Mirrors the Qt logic: palette name + OS light/dark scheme.
-        // TODO: read the real OS scheme from the viewport once eframe exposes it.
-        theme::apply(ctx, self.settings_palette, true);
+        // Mirrors the Qt logic: palette base name + OS light/dark scheme.
+        theme::apply(ctx, self.settings_palette, self.settings_scheme.is_dark());
+    }
+
+    fn apply_style(&self, ctx: &egui::Context) {
+        crate::theme::style::apply(ctx, &self.settings_style);
+    }
+
+    /// Saved `fixedControlPanel` value (runtime behavior follows the saved
+    /// config, not the unsaved settings-dialog draft).
+    fn fixed_panel(&self) -> bool {
+        get_bool(&self.config, "fixedControlPanel", false)
+    }
+
+    /// Window title, mirrors `setWindowTitle(f'{name} - Anime Player')`.
+    fn refresh_title(&self, ctx: &egui::Context) {
+        let title = match self.player.current_file() {
+            Some(path) => {
+                let s = path.to_string_lossy();
+                format!("{} - {APP_NAME}", display_name_of(&s))
+            }
+            None => APP_NAME.to_string(),
+        };
+        ctx.send_viewport_cmd(egui::ViewportCommand::Title(title));
+    }
+
+    // -- shared actions (menu bar + context menu + shortcuts) -------------
+
+    fn do_open_file(&mut self, ctx: &egui::Context) {
+        if let Some(path) = pick_media_file() {
+            self.player.open_file(&*self.mpv, &path);
+            self.set_opened("file", &path.to_string_lossy());
+            self.refresh_title(ctx);
+        }
+    }
+
+    fn do_open_url(&mut self, ctx: &egui::Context, link: &str) {
+        self.player.open_url(&*self.mpv, link);
+        self.set_opened("url", link);
+        self.refresh_title(ctx);
+    }
+
+    fn do_open_folder(&mut self, ctx: &egui::Context, folder: &Path) {
+        self.playlist_visible = true;
+        self.player.open_folder(&*self.mpv, folder, None);
+        self.set_opened("folder", &folder.to_string_lossy());
+        self.refresh_title(ctx);
+    }
+
+    fn do_close(&mut self, ctx: &egui::Context) {
+        self.player.close(&*self.mpv);
+        self.config.set("opened", json!(["", ""]));
+        self.refresh_title(ctx);
+    }
+
+    fn do_next(&mut self, ctx: &egui::Context) {
+        if self.player.next(&*self.mpv) {
+            self.refresh_title(ctx);
+        }
+    }
+
+    fn do_prev(&mut self, ctx: &egui::Context) {
+        if self.player.prev(&*self.mpv) {
+            self.refresh_title(ctx);
+        }
+    }
+
+    fn do_play_index(&mut self, ctx: &egui::Context, index: usize) {
+        if self.player.play_index(&*self.mpv, index) {
+            self.refresh_title(ctx);
+        }
+    }
+
+    /// Copies saved config into the settings drafts and opens the dialog
+    /// (mirrors constructing a fresh `SettingsWindow` each time).
+    fn open_settings(&mut self) {
+        self.settings_lang =
+            Lang::from_config_value(get_str(&self.config, "language").as_deref());
+        self.settings_open_last = get_bool(&self.config, "onOpenLastFile", true);
+        self.settings_pos_last = get_bool(&self.config, "onPosLastFile", true);
+        self.settings_volume_plus = get_bool(&self.config, "volumePlus", false);
+        self.settings_svp = get_bool(&self.config, "SVP", false);
+        self.settings_fixed_panel = get_bool(&self.config, "fixedControlPanel", false);
+        self.settings_sound_offset = self
+            .config
+            .get("soundOffset")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0);
+        self.settings_palette = Palette::from_name(
+            get_str(&self.config, "palette").as_deref().unwrap_or("System"),
+        );
+        self.settings_style = crate::theme::style::normalize(
+            get_str(&self.config, "style").as_deref().unwrap_or("default"),
+        )
+        .to_string();
+        self.settings_scheme = ColorScheme::from_name(
+            get_str(&self.config, "colorScheme")
+                .as_deref()
+                .unwrap_or("System"),
+        );
+        self.show_settings = true;
+    }
+
+    /// Copies saved launch parameters into the draft and opens the dialog.
+    fn open_launch(&mut self) {
+        self.launch_params_text = get_str(&self.config, "launchParameters").unwrap_or_default();
+        self.show_launch_params = true;
+    }
+
+    // -- per-frame helpers -------------------------------------------------
+
+    fn track_mouse(&mut self, ctx: &egui::Context) {
+        let pos = ctx.input(|i| i.pointer.latest_pos());
+        if pos != self.last_mouse_pos {
+            self.last_mouse_pos = pos;
+            self.last_mouse_time = Instant::now();
+        }
+    }
+
+    fn mouse_idle(&self) -> bool {
+        self.last_mouse_time.elapsed() > FULLSCREEN_CURSOR_IDLE
+    }
+
+    fn mouse_in_bottom_zone(&self, ctx: &egui::Context) -> bool {
+        let rect = ctx.viewport_rect();
+        match self.last_mouse_pos {
+            Some(p) => p.y > rect.bottom() - FULLSCREEN_BOTTOM_ZONE,
+            None => false,
+        }
+    }
+
+    fn mouse_in_right_zone(&self, ctx: &egui::Context) -> bool {
+        let rect = ctx.viewport_rect();
+        match self.last_mouse_pos {
+            Some(p) => p.x > rect.right() - FULLSCREEN_RIGHT_ZONE,
+            None => false,
+        }
+    }
+
+    /// Global shortcuts, mirrors the `shortcut` properties in
+    /// `forms/main_window.ui` (Ctrl+O/Ctrl+U/F1/F2/F4/F5/F6/F11/F12/Space/
+    /// D/0/1/2/3/arrows/+/-). Skipped for single-key shortcuts while typing
+    /// in a text field so text entry keeps working.
+    fn handle_shortcuts(&mut self, ctx: &egui::Context) {
+        use egui::{Key, Modifiers};
+        let typing = ctx.egui_wants_keyboard_input();
+        let pressed = |key: Key, mods: Modifiers| {
+            ctx.input(|i| i.key_pressed(key) && i.modifiers.matches_logically(mods))
+        };
+
+        // Modifier/function shortcuts work even while typing.
+        if pressed(Key::O, Modifiers::CTRL) {
+            self.do_open_file(ctx);
+            return;
+        }
+        if pressed(Key::U, Modifiers::CTRL) {
+            self.url_text.clear();
+            self.show_open_url = true;
+            return;
+        }
+        if pressed(Key::F2, Modifiers::NONE) {
+            self.folder_text.clear();
+            self.show_open_folder = true;
+            return;
+        }
+        if pressed(Key::F4, Modifiers::ALT) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            return;
+        }
+        if pressed(Key::F4, Modifiers::NONE) {
+            self.do_close(ctx);
+            return;
+        }
+        if pressed(Key::F5, Modifiers::NONE) {
+            self.open_settings();
+            return;
+        }
+        if pressed(Key::F11, Modifiers::NONE) {
+            self.toggle_fullscreen(ctx);
+            return;
+        }
+        if pressed(Key::F12, Modifiers::NONE) {
+            self.show_screenshot = true;
+            return;
+        }
+        if pressed(Key::F1, Modifiers::NONE) {
+            self.show_about = true;
+            return;
+        }
+        if pressed(Key::F6, Modifiers::NONE) {
+            self.playlist_visible = !self.playlist_visible;
+            return;
+        }
+        if pressed(Key::Escape, Modifiers::NONE) {
+            if self.player.fullscreen {
+                self.toggle_fullscreen(ctx);
+            } else {
+                self.show_settings = false;
+                self.show_about = false;
+                self.show_open_url = false;
+                self.show_open_folder = false;
+                self.show_screenshot = false;
+                self.show_launch_params = false;
+                self.show_android = false;
+                self.show_reference = false;
+            }
+            return;
+        }
+        if typing {
+            return;
+        }
+        if pressed(Key::Space, Modifiers::NONE) {
+            self.toggle_play();
+            return;
+        }
+        if pressed(Key::D, Modifiers::NONE) {
+            self.player.disable_anime4k(&*self.mpv);
+            return;
+        }
+        if pressed(Key::Num0, Modifiers::NONE) {
+            self.mpv.set_speed(0.25);
+            return;
+        }
+        if pressed(Key::Num1, Modifiers::NONE) {
+            self.mpv.set_speed(1.0);
+            return;
+        }
+        if pressed(Key::Num2, Modifiers::NONE) {
+            self.mpv.set_speed(2.0);
+            return;
+        }
+        if pressed(Key::Num3, Modifiers::NONE) {
+            self.mpv.set_speed(3.0);
+            return;
+        }
+        if pressed(Key::ArrowRight, Modifiers::NONE) {
+            self.mpv.seek(5.0);
+            return;
+        }
+        if pressed(Key::ArrowLeft, Modifiers::NONE) {
+            self.mpv.seek(-5.0);
+            return;
+        }
+        if pressed(Key::ArrowUp, Modifiers::NONE) {
+            self.player.volume_up(&*self.mpv);
+            self.config.set("volume", json!(self.player.volume));
+            return;
+        }
+        if pressed(Key::ArrowDown, Modifiers::NONE) {
+            self.player.volume_down(&*self.mpv);
+            self.config.set("volume", json!(self.player.volume));
+            return;
+        }
+        if pressed(Key::Plus, Modifiers::NONE)
+            || pressed(Key::Equals, Modifiers::NONE)
+            || pressed(Key::Plus, Modifiers::SHIFT)
+        {
+            self.mpv.set_video_zoom(self.mpv.video_zoom() + 0.01);
+            return;
+        }
+        if pressed(Key::Minus, Modifiers::NONE) {
+            self.mpv.set_video_zoom(self.mpv.video_zoom() - 0.01);
+        }
+    }
+
+    /// Auto-advance the playlist at end-of-file (polls `eof-reached`,
+    /// the render-thread equivalent of libmpv's `end-file` event).
+    fn check_auto_next(&mut self, ctx: &egui::Context) {
+        if self.player.current.is_none() || self.mpv.pause() {
+            return;
+        }
+        if !self.mpv.eof_reached() {
+            return;
+        }
+        // Advance once per EOF; if there is no next file, keep the last
+        // frame on screen (matches `keep-open=yes`).
+        if self.player.next(&*self.mpv) {
+            self.refresh_title(ctx);
+        }
     }
 
     fn restore_startup(&mut self, cli_arg: Option<String>) {
@@ -327,11 +668,28 @@ impl eframe::App for AnimePlayerApp {
         // Mirrors the QTimer(100ms) tick: poll mpv state and repaint.
         ctx.request_repaint_after(Duration::from_millis(100));
         self.handle_dropped_files(&ctx);
-        self.menu_bar(ui);
-        if self.playlist_visible {
+        self.handle_shortcuts(&ctx);
+        self.check_auto_next(&ctx);
+        self.track_mouse(&ctx);
+
+        let hide_chrome = self.player.fullscreen && !self.fixed_panel();
+        if hide_chrome && self.mouse_idle() && !self.mouse_in_bottom_zone(&ctx) {
+            ctx.output_mut(|o| o.cursor_icon = egui::CursorIcon::None);
+        }
+
+        if !hide_chrome {
+            self.menu_bar(ui);
+        }
+        // egui order: top, bottom, side, central.
+        let show_controls = !hide_chrome || self.mouse_in_bottom_zone(&ctx);
+        if show_controls {
+            self.controls_panel(ui);
+        }
+        let show_playlist =
+            self.playlist_visible && (!hide_chrome || self.mouse_in_right_zone(&ctx));
+        if show_playlist {
             self.playlist_panel(ui);
         }
-        self.controls_panel(ui);
         self.video_panel(ui);
         self.dialogs(&ctx);
     }
@@ -352,20 +710,26 @@ impl AnimePlayerApp {
         });
         let mut first_new = true;
         for path in dropped {
-            if crate::formats::is_subtitles_file(&path.to_string_lossy()) && path.is_file() {
+            // Symlinks open as URLs, mirroring `os.path.islink -> open_url`.
+            if is_symlink(&path) {
+                let link = path.to_string_lossy().into_owned();
+                self.do_open_url(ctx, &link);
+                break;
+            } else if crate::formats::is_subtitles_file(&path.to_string_lossy())
+                && path.is_file()
+            {
                 self.mpv.add_sub_file(&path.to_string_lossy());
             } else if path.is_file() {
-                self.player.open_file(&*self.mpv, &path);
                 if first_new {
+                    self.player.open_file(&*self.mpv, &path);
                     self.set_opened("file", &path.to_string_lossy());
+                    self.refresh_title(ctx);
                     first_new = false;
                 } else {
                     self.player.add_file(path);
                 }
             } else if path.is_dir() {
-                self.playlist_visible = true;
-                self.player.open_folder(&*self.mpv, &path, None);
-                self.set_opened("folder", &path.to_string_lossy());
+                self.do_open_folder(ctx, &path);
                 break;
             }
         }
@@ -376,20 +740,20 @@ impl AnimePlayerApp {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button(self.t("File"), |ui| {
                     if ui.button(self.t("Open file")).clicked() {
-                        if let Some(path) = pick_media_file() {
-                            self.player.open_file(&*self.mpv, &path);
-                            self.set_opened("file", &path.to_string_lossy());
-                        }
+                        let ctx = ui.ctx().clone();
+                        self.do_open_file(&ctx);
                     }
                     if ui.button(self.t("Open URL")).clicked() {
+                        self.url_text.clear();
                         self.show_open_url = true;
                     }
                     if ui.button(self.t("Open folder")).clicked() {
+                        self.folder_text.clear();
                         self.show_open_folder = true;
                     }
                     if ui.button(self.t("Close")).clicked() {
-                        self.player.close(&*self.mpv);
-                        self.config.set("opened", json!(["", ""]));
+                        let ctx = ui.ctx().clone();
+                        self.do_close(&ctx);
                     }
                     if ui.button(self.t("Exit")).clicked() {
                         ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -400,7 +764,8 @@ impl AnimePlayerApp {
                         self.toggle_play();
                     }
                     if ui.button(self.t("Fullscreen")).clicked() {
-                        self.toggle_fullscreen(ui.ctx());
+                        let ctx = ui.ctx().clone();
+                        self.toggle_fullscreen(&ctx);
                     }
                     ui.menu_button(self.t("Playback speed"), |ui| {
                         for speed in SPEEDS {
@@ -462,10 +827,10 @@ impl AnimePlayerApp {
                         self.show_screenshot = true;
                     }
                     if ui.button(self.t("Settings")).clicked() {
-                        self.show_settings = true;
+                        self.open_settings();
                     }
                     if ui.button(self.t("Launch parameters")).clicked() {
-                        self.show_launch_params = true;
+                        self.open_launch();
                     }
                     if ui.button(self.t("Create config for Android")).clicked() {
                         self.show_android = true;
@@ -481,30 +846,155 @@ impl AnimePlayerApp {
         });
     }
 
-    fn video_panel(&mut self, ui: &mut egui::Ui) {
-        #[cfg(feature = "video")]
-        if let Some(renderer) = self.video.as_mut() {
-            let status = self.status.clone();
-            egui::CentralPanel::default().show(ui, |ui| {
-                let available = ui.available_size();
-                let (rect, _resp) = ui.allocate_exact_size(available, egui::Sense::click());
-                ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
-                renderer.show(ui, rect);
-                if !status.is_empty() {
-                    ui.painter().text(
-                        rect.left_bottom() + egui::vec2(8.0, -8.0),
-                        egui::Align2::LEFT_BOTTOM,
-                        status,
-                        egui::FontId::proportional(13.0),
-                        egui::Color32::LIGHT_GRAY,
-                    );
+    /// Right-click menu, mirrors `MainWindow.show_context_menu`.
+    fn context_menu(&mut self, ui: &mut egui::Ui) {
+        if ui.button(self.t("Open file")).clicked() {
+            let ctx = ui.ctx().clone();
+            self.do_open_file(&ctx);
+            ui.close();
+        }
+        if ui.button(self.t("Open folder")).clicked() {
+            self.folder_text.clear();
+            self.show_open_folder = true;
+            ui.close();
+        }
+        if ui.button(self.t("Open URL")).clicked() {
+            self.url_text.clear();
+            self.show_open_url = true;
+            ui.close();
+        }
+        if ui.button(self.t("Close")).clicked() {
+            let ctx = ui.ctx().clone();
+            self.do_close(&ctx);
+            ui.close();
+        }
+        ui.separator();
+        ui.menu_button(self.t("Increasing image quality"), |ui| {
+            if ui.button(self.t("Disable")).clicked() {
+                self.player.disable_anime4k(&*self.mpv);
+                ui.close();
+            }
+            for quality in anime4k::QUALITIES {
+                ui.menu_button(format!("{} {quality}", self.t("Quality")), |ui| {
+                    for mode in anime4k::MODES {
+                        if ui.button(format!("{} {mode}", self.t("Mode"))).clicked() {
+                            self.apply_anime4k(quality, mode);
+                            ui.close();
+                        }
+                    }
+                });
+            }
+            ui.menu_button(format!("{} HQ", self.t("Quality")), |ui| {
+                let mut names: Vec<String> = anime4k::ultra_hq_presets()
+                    .keys()
+                    .map(|s| s.to_string())
+                    .collect();
+                names.sort();
+                for name in names {
+                    if ui.button(format!("{} {name}", self.t("Mode"))).clicked() {
+                        self.apply_anime4k_hq(&name);
+                        ui.close();
+                    }
                 }
             });
+        });
+        ui.separator();
+        if ui.button(self.t("Play | Pause")).clicked() {
+            self.toggle_play();
+            ui.close();
+        }
+        ui.menu_button(self.t("Playback speed"), |ui| {
+            for speed in SPEEDS {
+                if ui.button(format!("x{speed:.2}")).clicked() {
+                    self.mpv.set_speed(*speed);
+                    ui.close();
+                }
+            }
+        });
+        if ui.button(self.t("Playlist")).clicked() {
+            self.playlist_visible = !self.playlist_visible;
+            ui.close();
+        }
+        if ui.button(self.t("Zoom in")).clicked() {
+            self.mpv.set_video_zoom(self.mpv.video_zoom() + 0.01);
+            ui.close();
+        }
+        if ui.button(self.t("Zoom out")).clicked() {
+            self.mpv.set_video_zoom(self.mpv.video_zoom() - 0.01);
+            ui.close();
+        }
+        if ui.button(self.t("Take a screenshot")).clicked() {
+            self.show_screenshot = true;
+            ui.close();
+        }
+        if ui.button(self.t("Fullscreen")).clicked() {
+            let ctx = ui.ctx().clone();
+            self.toggle_fullscreen(&ctx);
+            ui.close();
+        }
+        ui.separator();
+        if ui.button(self.t("Settings")).clicked() {
+            self.open_settings();
+            ui.close();
+        }
+        if ui.button(self.t("About")).clicked() {
+            self.show_about = true;
+            ui.close();
+        }
+        ui.separator();
+        if ui.button(self.t("Exit")).clicked() {
+            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            ui.close();
+        }
+    }
+
+    fn video_panel(&mut self, ui: &mut egui::Ui) {
+        #[cfg(feature = "video")]
+        if self.video.is_some() {
+            let status = self.status.clone();
+            let resp = egui::CentralPanel::default()
+                .show(ui, |ui| {
+                    let available = ui.available_size();
+                    let (rect, resp) =
+                        ui.allocate_exact_size(available, egui::Sense::click());
+                    ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
+                    if let Some(renderer) = self.video.as_mut() {
+                        renderer.show(ui, rect);
+                    }
+                    if !status.is_empty() {
+                        ui.painter().text(
+                            rect.left_bottom() + egui::vec2(8.0, -8.0),
+                            egui::Align2::LEFT_BOTTOM,
+                            status,
+                            egui::FontId::proportional(13.0),
+                            egui::Color32::LIGHT_GRAY,
+                        );
+                    }
+                    resp
+                })
+                .inner;
+            // Mirrors mouseReleaseEvent: single click = play/pause,
+            // double click = fullscreen.
+            use egui::PointerButton;
+            let fullscreen_click = resp.double_clicked_by(PointerButton::Primary);
+            let play_click =
+                !fullscreen_click && resp.clicked_by(PointerButton::Primary);
+            resp.context_menu(|ui| {
+                self.context_menu(ui);
+            });
+            if fullscreen_click {
+                let ctx = ui.ctx().clone();
+                self.toggle_fullscreen(&ctx);
+            } else if play_click {
+                self.toggle_play();
+            }
             return;
         }
+        let mut clicked_play = false;
+        let mut clicked_fullscreen = false;
         egui::CentralPanel::default().show(ui, |ui| {
             let available = ui.available_size();
-            let (rect, _resp) = ui.allocate_exact_size(available, egui::Sense::click());
+            let (rect, resp) = ui.allocate_exact_size(available, egui::Sense::click());
             ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
             if self.player.current.is_none() {
                 ui.painter().text(
@@ -525,7 +1015,22 @@ impl AnimePlayerApp {
                     egui::Color32::LIGHT_GRAY,
                 );
             }
+            use egui::PointerButton;
+            if resp.double_clicked_by(PointerButton::Primary) {
+                clicked_fullscreen = true;
+            } else if resp.clicked_by(PointerButton::Primary) {
+                clicked_play = true;
+            }
+            resp.context_menu(|ui| {
+                self.context_menu(ui);
+            });
         });
+        if clicked_fullscreen {
+            let ctx = ui.ctx().clone();
+            self.toggle_fullscreen(&ctx);
+        } else if clicked_play {
+            self.toggle_play();
+        }
     }
 
     fn media_info(&self) -> String {
@@ -563,29 +1068,40 @@ impl AnimePlayerApp {
     fn controls_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("controls").show(ui, |ui| {
             ui.horizontal(|ui| {
-                if ui.button("⏮").clicked() {
-                    self.player.prev(&*self.mpv);
+                if ui
+                    .button("⏮")
+                    .on_hover_text(self.t("Previous file"))
+                    .clicked()
+                {
+                    let ctx = ui.ctx().clone();
+                    self.do_prev(&ctx);
                 }
                 let playing = !self.mpv.pause() && self.mpv.duration().is_some();
-                if ui.button(if playing { "⏸" } else { "▶" }).clicked() {
+                let play_tip = if playing {
+                    self.t("Pause")
+                } else {
+                    self.t("Play")
+                };
+                if ui.button(if playing { "⏸" } else { "▶" }).on_hover_text(play_tip).clicked() {
                     self.toggle_play();
                 }
-                if ui.button("⏭").clicked() {
-                    self.player.next(&*self.mpv);
+                if ui.button("⏭").on_hover_text(self.t("Next file")).clicked() {
+                    let ctx = ui.ctx().clone();
+                    self.do_next(&ctx);
                 }
-                if ui.button("⛶").clicked() {
+                if ui.button("⛶").on_hover_text(self.t("Fullscreen")).clicked() {
                     let ctx = ui.ctx().clone();
                     self.toggle_fullscreen(&ctx);
                 }
-                if ui.button("🎵").clicked() {
+                if ui.button("🎵").on_hover_text(self.t("Soundtrack")).clicked() {
                     self.show_audio_menu = !self.show_audio_menu;
                     self.show_sub_menu = false;
                 }
-                if ui.button("💬").clicked() {
+                if ui.button("💬").on_hover_text(self.t("Subtitles")).clicked() {
                     self.show_sub_menu = !self.show_sub_menu;
                     self.show_audio_menu = false;
                 }
-                if ui.button("☰").clicked() {
+                if ui.button("☰").on_hover_text(self.t("Menu")).clicked() {
                     self.playlist_visible = !self.playlist_visible;
                 }
 
@@ -593,22 +1109,27 @@ impl AnimePlayerApp {
                 let pos = self.mpv.time_pos().unwrap_or(0.0);
                 let max = (duration * TIME_SCALE).max(1.0);
                 let mut slider_val = pos * TIME_SCALE;
-                let resp = ui.add(egui::Slider::new(&mut slider_val, 0.0..=max).show_value(false));
+                let resp = ui
+                    .add(
+                        egui::Slider::new(&mut slider_val, 0.0..=max).show_value(false),
+                    )
+                    .on_hover_text(format!("{} / {}", fmt_time(pos), fmt_time(duration)));
                 if resp.changed() {
                     self.mpv.set_time_pos(slider_val / TIME_SCALE);
                 }
-                ui.monospace(format!("{} / {}", mmss(pos), mmss(duration)));
+                ui.monospace(format!("{} / {}", fmt_time(pos), fmt_time(duration)));
 
                 let mut vol = self.mpv.volume();
                 let vmax = self.player.max_volume_self();
-                if ui
+                let vol_resp = ui
                     .add(egui::Slider::new(&mut vol, 0..=vmax).show_value(false))
-                    .changed()
-                {
+                    .on_hover_text(format!("{}: {}%", self.t("Volume level"), vol));
+                if vol_resp.changed() {
                     self.player.set_volume(&*self.mpv, vol);
                     self.config.set("volume", json!(self.player.volume));
                 }
-                ui.monospace(format!("{}%", self.player.volume));
+                ui.monospace(format!("{}%", self.player.volume))
+                    .on_hover_text(self.t("Volume level"));
             });
             ui.horizontal(|ui| {
                 ui.monospace(self.media_info());
@@ -632,6 +1153,7 @@ impl AnimePlayerApp {
             TrackKind::Sub => self.t("No subtitles"),
         };
         let disable = self.t("Disable");
+        let paste_label = self.t("Paste");
         let (add_label, select) = match kind {
             TrackKind::Audio => (self.t("Add audio track"), self.t("Select")),
             TrackKind::Sub => (self.t("Add subtitles"), self.t("Select")),
@@ -673,6 +1195,12 @@ impl AnimePlayerApp {
                     TrackKind::Sub => &mut self.add_sub_path,
                 };
                 ui.text_edit_singleline(path_field);
+                if ui.button(paste_label).clicked() {
+                    let text = read_clipboard_text();
+                    if !text.trim().is_empty() {
+                        *path_field = text.trim().to_string();
+                    }
+                }
                 if ui.button(choose_file).clicked() {
                     if let Some(picked) = pick_sidecar_file(&kind) {
                         *path_field = picked.to_string_lossy().into_owned();
@@ -698,16 +1226,25 @@ impl AnimePlayerApp {
             ui.heading(self.t("Playlist"));
             let names = self.player.filenames_only();
             let current = self.player.current;
+            let mut chosen: Option<usize> = None;
             egui::ScrollArea::vertical().show(ui, |ui| {
                 for (i, name) in names.iter().enumerate() {
                     let selected = current == Some(i);
                     if ui.selectable_label(selected, name).clicked() {
-                        self.player.play_index(&*self.mpv, i);
+                        chosen = Some(i);
                     }
                 }
             });
+            if let Some(i) = chosen {
+                let ctx = ui.ctx().clone();
+                self.do_play_index(&ctx, i);
+            }
+            // Mirrors sourceInfo: folder path, or "URL" for links.
             if let Some(cur) = self.player.current_file() {
-                if let Some(parent) = cur.parent() {
+                let s = cur.to_string_lossy();
+                if is_url_like(&s) {
+                    ui.monospace("URL");
+                } else if let Some(parent) = cur.parent() {
                     ui.monospace(parent.to_string_lossy());
                 }
             }
@@ -782,51 +1319,111 @@ impl AnimePlayerApp {
         let fixed_label = self.t("Fixed multimedia control panel");
         let offset_label = self.t("Sound offset");
         let palette_label = self.t("Palette");
+        let style_label = self.t("Theme style");
+        let scheme_label = self.t("Color scheme");
         let save_label = self.t("Save");
+        let cancel_label = self.t("Cancel");
+        let scheme_system = self.t("System");
+        let scheme_dark = self.t("Dark");
+        let scheme_light = self.t("Light");
         let mut open = self.show_settings;
         let mut save = false;
-        egui::Window::new(title).open(&mut open).show(ctx, |ui| {
-            ui.label(language_label);
-            egui::ComboBox::from_id_salt("lang")
-                .selected_text(self.settings_lang.config_value())
-                .show_ui(ui, |ui| {
-                    for lang in [
-                        Lang::Auto,
-                        Lang::English,
-                        Lang::Russian,
-                        Lang::Japanese,
-                        Lang::PortugueseBrazil,
-                    ] {
-                        ui.selectable_value(&mut self.settings_lang, lang, lang.config_value());
-                    }
-                });
-            ui.checkbox(&mut self.settings_open_last, open_last_label);
-            ui.checkbox(&mut self.settings_pos_last, pos_last_label);
-            ui.checkbox(&mut self.settings_volume_plus, volume_plus_label);
-            ui.checkbox(&mut self.settings_svp, svp_label);
-            ui.checkbox(&mut self.settings_fixed_panel, fixed_label);
-            ui.horizontal(|ui| {
-                ui.label(offset_label);
-                ui.add(egui::DragValue::new(&mut self.settings_sound_offset).speed(0.1));
-            });
-            ui.horizontal(|ui| {
-                ui.label(palette_label);
-                egui::ComboBox::from_id_salt("palette")
-                    .selected_text(self.settings_palette.name())
+        let mut cancel = false;
+        egui::Window::new(title)
+            .open(&mut open)
+            .resizable(false)
+            .min_width(300.0)
+            .show(ctx, |ui| {
+                ui.label(language_label);
+                egui::ComboBox::from_id_salt("lang")
+                    .selected_text(self.settings_lang.config_value())
                     .show_ui(ui, |ui| {
-                        for name in Palette::all_names() {
-                            ui.selectable_value(
-                                &mut self.settings_palette,
-                                Palette::from_name(name),
-                                *name,
-                            );
+                        for lang in [
+                            Lang::Auto,
+                            Lang::English,
+                            Lang::Russian,
+                            Lang::Japanese,
+                            Lang::PortugueseBrazil,
+                        ] {
+                            ui.selectable_value(&mut self.settings_lang, lang, lang.config_value());
                         }
                     });
+                ui.checkbox(&mut self.settings_open_last, open_last_label);
+                ui.checkbox(&mut self.settings_pos_last, pos_last_label);
+                ui.checkbox(&mut self.settings_volume_plus, volume_plus_label);
+                ui.checkbox(&mut self.settings_svp, svp_label);
+                ui.checkbox(&mut self.settings_fixed_panel, fixed_label);
+                ui.horizontal(|ui| {
+                    ui.label(offset_label);
+                    // Mirrors QDoubleSpinBox -100..100 step 0.01.
+                    ui.add(
+                        egui::DragValue::new(&mut self.settings_sound_offset)
+                            .speed(0.01)
+                            .range(-100.0..=100.0),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    ui.label(palette_label);
+                    egui::ComboBox::from_id_salt("palette")
+                        .selected_text(self.settings_palette.name())
+                        .show_ui(ui, |ui| {
+                            for name in Palette::all_names() {
+                                ui.selectable_value(
+                                    &mut self.settings_palette,
+                                    Palette::from_name(name),
+                                    *name,
+                                );
+                            }
+                        });
+                });
+                ui.horizontal(|ui| {
+                    ui.label(scheme_label);
+                    egui::ComboBox::from_id_salt("scheme")
+                        .selected_text(self.settings_scheme.name())
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(
+                                &mut self.settings_scheme,
+                                ColorScheme::System,
+                                scheme_system.as_str(),
+                            );
+                            ui.selectable_value(
+                                &mut self.settings_scheme,
+                                ColorScheme::Dark,
+                                scheme_dark.as_str(),
+                            );
+                            ui.selectable_value(
+                                &mut self.settings_scheme,
+                                ColorScheme::Light,
+                                scheme_light.as_str(),
+                            );
+                        });
+                });
+                ui.horizontal(|ui| {
+                    ui.label(style_label);
+                    egui::ComboBox::from_id_salt("qstyle")
+                        .selected_text(self.settings_style.clone())
+                        .show_ui(ui, |ui| {
+                            for name in crate::theme::style::all_names() {
+                                ui.selectable_value(
+                                    &mut self.settings_style,
+                                    (*name).to_string(),
+                                    *name,
+                                );
+                            }
+                        });
+                });
+                ui.horizontal(|ui| {
+                    if ui.button(save_label).clicked() {
+                        save = true;
+                    }
+                    if ui.button(cancel_label).clicked() {
+                        cancel = true;
+                    }
+                });
             });
-            if ui.button(save_label).clicked() {
-                save = true;
-            }
-        });
+        if cancel {
+            open = false;
+        }
         self.show_settings = open;
         if save {
             self.save_settings(ctx);
@@ -844,10 +1441,15 @@ impl AnimePlayerApp {
             .set("volumePlus", json!(self.settings_volume_plus));
         self.config
             .set("fixedControlPanel", json!(self.settings_fixed_panel));
+        self.settings_sound_offset = self.settings_sound_offset.clamp(-100.0, 100.0);
         self.config
             .set("soundOffset", json!(self.settings_sound_offset));
         self.config
             .set("palette", json!(self.settings_palette.name()));
+        self.config
+            .set("style", json!(self.settings_style.clone()));
+        self.config
+            .set("colorScheme", json!(self.settings_scheme.name()));
         let lang_value = self.settings_lang.config_value().to_string();
         if get_str(&self.config, "language").as_deref() != Some(lang_value.as_str()) {
             self.config.set("language", json!(lang_value));
@@ -863,6 +1465,7 @@ impl AnimePlayerApp {
         }
         self.mpv.set_audio_delay(self.settings_sound_offset);
         self.mpv.set_svp(self.settings_svp);
+        self.apply_style(ctx);
         self.apply_theme(ctx);
     }
 
@@ -874,11 +1477,26 @@ impl AnimePlayerApp {
         let about_text = self.t("About program");
         let version = self.mpv.mpv_version();
         let mut open = self.show_about;
-        egui::Window::new(title).open(&mut open).show(ctx, |ui| {
-            ui.heading(format!("{APP_NAME} v{VERSION}"));
-            ui.label(version);
-            ui.label(about_text);
-        });
+        egui::Window::new(title)
+            .open(&mut open)
+            .resizable(false)
+            .min_width(420.0)
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::Image::from_bytes(
+                            "bytes://anime-player-icon",
+                            include_bytes!("../assets/images/anime-player-icon.png"),
+                        )
+                        .max_width(120.0),
+                    );
+                    ui.vertical(|ui| {
+                        ui.heading(format!("{APP_NAME} v{VERSION}"));
+                        ui.label(version);
+                    });
+                });
+                ui.label(about_text);
+            });
         self.show_about = open;
     }
 
@@ -889,42 +1507,64 @@ impl AnimePlayerApp {
         let title = self.t("Opening a link");
         let prompt = self.t("Enter the URL");
         let clear = self.t("Clear");
+        let paste = self.t("Paste");
         let go = self.t("Select");
+        let cancel = self.t("Cancel");
         let mut open = self.show_open_url;
         let mut chosen: Option<String> = None;
+        let mut cancelled = false;
         let history = self
             .config
             .get("linksHistory")
             .and_then(|v| v.as_array().cloned())
             .unwrap_or_default();
-        egui::Window::new(title).open(&mut open).show(ctx, |ui| {
-            ui.label(prompt);
-            ui.text_edit_singleline(&mut self.url_text);
-            if ui.button(clear).clicked() {
-                self.config.set("linksHistory", json!(Vec::<String>::new()));
-            }
-            for link in &history {
-                if let Some(link) = link.as_str() {
-                    if ui.link(link).clicked() {
-                        self.url_text = link.to_string();
+        egui::Window::new(title)
+            .open(&mut open)
+            .resizable(false)
+            .min_width(480.0)
+            .show(ctx, |ui| {
+                ui.label(prompt);
+                ui.text_edit_singleline(&mut self.url_text);
+                ui.horizontal(|ui| {
+                    if ui.button(paste).clicked() {
+                        let text = read_clipboard_text();
+                        if !text.trim().is_empty() {
+                            self.url_text = text.trim().to_string();
+                        }
+                    }
+                    if ui.button(clear).clicked() {
+                        self.config.set("linksHistory", json!(Vec::<String>::new()));
+                    }
+                });
+                for link in &history {
+                    if let Some(link) = link.as_str() {
+                        if ui.link(link).clicked() {
+                            self.url_text = link.to_string();
+                        }
                     }
                 }
-            }
-            if ui.button(go).clicked() {
-                let link = self.url_text.trim().to_string();
-                if !link.is_empty() {
-                    let mut updated = history.clone();
-                    updated.retain(|v| v.as_str() != Some(link.as_str()));
-                    updated.insert(0, Value::String(link.clone()));
-                    self.config.set("linksHistory", Value::Array(updated));
-                    chosen = Some(link);
-                }
-            }
-        });
+                ui.horizontal(|ui| {
+                    if ui.button(go).clicked() {
+                        let link = self.url_text.trim().to_string();
+                        if !link.is_empty() {
+                            let mut updated = history.clone();
+                            updated.retain(|v| v.as_str() != Some(link.as_str()));
+                            updated.insert(0, Value::String(link.clone()));
+                            self.config.set("linksHistory", Value::Array(updated));
+                            chosen = Some(link);
+                        }
+                    }
+                    if ui.button(cancel).clicked() {
+                        cancelled = true;
+                    }
+                });
+            });
+        if cancelled {
+            open = false;
+        }
         self.show_open_url = open;
         if let Some(link) = chosen {
-            self.player.open_url(&*self.mpv, &link);
-            self.set_opened("url", &link);
+            self.do_open_url(ctx, &link);
             self.show_open_url = false;
         }
     }
@@ -936,54 +1576,73 @@ impl AnimePlayerApp {
         let title = self.t("Opening a folder");
         let prompt = self.t("Select a folder");
         let clear = self.t("Clear");
+        let paste = self.t("Paste");
         let go = self.t("Select");
+        let cancel = self.t("Cancel");
         let err = self.t("Error");
         let mut open = self.show_open_folder;
         let mut chosen: Option<String> = None;
+        let mut cancelled = false;
         let history = self
             .config
             .get("foldersHistory")
             .and_then(|v| v.as_array().cloned())
             .unwrap_or_default();
-        egui::Window::new(title).open(&mut open).show(ctx, |ui| {
-            ui.label(prompt);
-            ui.text_edit_singleline(&mut self.folder_text);
-            ui.horizontal(|ui| {
-                if ui.button(self.t("Select")).clicked() {
-                    if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                        self.folder_text = dir.to_string_lossy().into_owned();
+        egui::Window::new(title)
+            .open(&mut open)
+            .resizable(false)
+            .min_width(480.0)
+            .show(ctx, |ui| {
+                ui.label(prompt);
+                ui.text_edit_singleline(&mut self.folder_text);
+                ui.horizontal(|ui| {
+                    if ui.button(self.t("Select")).clicked() {
+                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                            self.folder_text = dir.to_string_lossy().into_owned();
+                        }
+                    }
+                    if ui.button(paste).clicked() {
+                        let text = read_clipboard_text();
+                        if !text.trim().is_empty() {
+                            self.folder_text = text.trim().to_string();
+                        }
+                    }
+                    if ui.button(clear).clicked() {
+                        self.config
+                            .set("foldersHistory", json!(Vec::<String>::new()));
+                    }
+                });
+                for folder in &history {
+                    if let Some(folder) = folder.as_str() {
+                        if ui.link(folder).clicked() {
+                            self.folder_text = folder.to_string();
+                        }
                     }
                 }
-                if ui.button(clear).clicked() {
-                    self.config
-                        .set("foldersHistory", json!(Vec::<String>::new()));
-                }
+                ui.horizontal(|ui| {
+                    if ui.button(go).clicked() {
+                        let folder = self.folder_text.trim().to_string();
+                        if !folder.is_empty() {
+                            let mut updated = history.clone();
+                            updated.retain(|v| v.as_str() != Some(folder.as_str()));
+                            updated.insert(0, Value::String(folder.clone()));
+                            self.config.set("foldersHistory", Value::Array(updated));
+                            chosen = Some(folder);
+                        }
+                    }
+                    if ui.button(cancel).clicked() {
+                        cancelled = true;
+                    }
+                });
             });
-            for folder in &history {
-                if let Some(folder) = folder.as_str() {
-                    if ui.link(folder).clicked() {
-                        self.folder_text = folder.to_string();
-                    }
-                }
-            }
-            if ui.button(go).clicked() {
-                let folder = self.folder_text.trim().to_string();
-                if !folder.is_empty() {
-                    let mut updated = history.clone();
-                    updated.retain(|v| v.as_str() != Some(folder.as_str()));
-                    updated.insert(0, Value::String(folder.clone()));
-                    self.config.set("foldersHistory", Value::Array(updated));
-                    chosen = Some(folder);
-                }
-            }
-        });
+        if cancelled {
+            open = false;
+        }
         self.show_open_folder = open;
         if let Some(folder) = chosen {
             let path = Path::new(&folder);
             if path.is_dir() {
-                self.playlist_visible = true;
-                self.player.open_folder(&*self.mpv, path, None);
-                self.set_opened("folder", &folder);
+                self.do_open_folder(ctx, path);
             } else {
                 self.status = format!("{err}: {folder}");
             }
@@ -998,31 +1657,42 @@ impl AnimePlayerApp {
         let title = self.t("Screenshot");
         let prompt = self.t("Enter folder path for screenshots");
         let save = self.t("Save");
+        let paste = self.t("Paste");
         let err = self.t("Error");
         let mut open = self.show_screenshot;
         let mut done = false;
         let mut failed = false;
-        egui::Window::new(title).open(&mut open).show(ctx, |ui| {
-            ui.label(prompt);
-            ui.text_edit_singleline(&mut self.screenshot_dir_text);
-            ui.horizontal(|ui| {
-                if ui.button(self.t("Select")).clicked() {
-                    if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                        self.screenshot_dir_text = dir.to_string_lossy().into_owned();
+        egui::Window::new(title)
+            .open(&mut open)
+            .resizable(false)
+            .min_width(460.0)
+            .show(ctx, |ui| {
+                ui.label(prompt);
+                ui.text_edit_singleline(&mut self.screenshot_dir_text);
+                ui.horizontal(|ui| {
+                    if ui.button(self.t("Select")).clicked() {
+                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                            self.screenshot_dir_text = dir.to_string_lossy().into_owned();
+                        }
                     }
-                }
-                if ui.button(save).clicked() {
-                    let dir = self.screenshot_dir_text.trim().to_string();
-                    if !dir.is_empty() {
-                        self.mpv.set_screenshot_directory(&dir);
-                        self.mpv.screenshot();
-                        done = true;
-                    } else {
-                        failed = true;
+                    if ui.button(paste).clicked() {
+                        let text = read_clipboard_text();
+                        if !text.trim().is_empty() {
+                            self.screenshot_dir_text = text.trim().to_string();
+                        }
                     }
-                }
+                    if ui.button(save).clicked() {
+                        let dir = self.screenshot_dir_text.trim().to_string();
+                        if !dir.is_empty() {
+                            self.mpv.set_screenshot_directory(&dir);
+                            self.mpv.screenshot();
+                            done = true;
+                        } else {
+                            failed = true;
+                        }
+                    }
+                });
             });
-        });
         if failed {
             self.status = err;
         }
@@ -1037,41 +1707,55 @@ impl AnimePlayerApp {
         let prompt = self.t("Manual launch parameters");
         let save_label = self.t("Save");
         let apply_label = self.t("Apply");
+        let cancel_label = self.t("Cancel");
         let success = self.t("Success");
         let err = self.t("Error");
         let mut open = self.show_launch_params;
         let mut saved = false;
+        let mut cancelled = false;
         let mut applied_ok: Option<bool> = None;
-        egui::Window::new(title).open(&mut open).show(ctx, |ui| {
-            ui.label(prompt);
-            ui.label("name=value");
-            ui.add(
-                egui::TextEdit::multiline(&mut self.launch_params_text)
-                    .desired_rows(8)
-                    .desired_width(f32::INFINITY),
-            );
-            ui.horizontal(|ui| {
-                if ui.button(save_label).clicked() {
-                    saved = true;
-                }
-                if ui.button(apply_label).clicked() {
-                    let mut ok = true;
-                    for (name, value) in parse_launch_params(&self.launch_params_text.clone()) {
-                        if name == "volume" {
-                            if let Ok(v) = value.parse::<i32>() {
-                                self.player.set_volume(&*self.mpv, v);
-                            } else {
-                                ok = false;
-                            }
-                        } else {
-                            self.mpv.set_option_str(&name, &value);
-                        }
+        egui::Window::new(title)
+            .open(&mut open)
+            .min_width(420.0)
+            .show(ctx, |ui| {
+                ui.label(prompt);
+                ui.label("name=value");
+                ui.add(
+                    egui::TextEdit::multiline(&mut self.launch_params_text)
+                        .desired_rows(8)
+                        .desired_width(f32::INFINITY),
+                );
+                ui.horizontal(|ui| {
+                    if ui.button(save_label).clicked() {
+                        saved = true;
                     }
-                    saved = true;
-                    applied_ok = Some(ok);
-                }
+                    if ui.button(apply_label).clicked() {
+                        let mut ok = true;
+                        for (name, value) in parse_launch_params(&self.launch_params_text.clone()) {
+                            if name == "volume" {
+                                if let Ok(v) = value.parse::<i32>() {
+                                    self.player.set_volume(&*self.mpv, v);
+                                } else {
+                                    ok = false;
+                                }
+                            } else {
+                                self.mpv.set_option_str(&name, &value);
+                            }
+                        }
+                        saved = true;
+                        applied_ok = Some(ok);
+                    }
+                    if ui.button(cancel_label).clicked() {
+                        // Discard the draft (mirrors dialog Cancel).
+                        cancelled = true;
+                    }
+                });
             });
-        });
+        if cancelled {
+            self.launch_params_text =
+                get_str(&self.config, "launchParameters").unwrap_or_default();
+            open = false;
+        }
         if saved {
             self.config
                 .set("launchParameters", json!(self.launch_params_text.clone()));
@@ -1196,8 +1880,19 @@ mod tests {
 
     #[test]
     fn time_format() {
-        assert_eq!(mmss(0.0), "00:00");
-        assert_eq!(mmss(65.0), "01:05");
-        assert_eq!(mmss(-3.0), "00:00");
+        assert_eq!(fmt_time(0.0), "00:00");
+        assert_eq!(fmt_time(65.0), "01:05");
+        assert_eq!(fmt_time(-3.0), "00:00");
+        assert_eq!(fmt_time(3600.0), "01:00:00");
+        assert_eq!(fmt_time(3723.0), "01:02:03");
+    }
+
+    #[test]
+    fn display_name_of_url_and_file() {
+        assert_eq!(
+            display_name_of("https://example.com/video.mp4"),
+            "video.mp4"
+        );
+        assert_eq!(display_name_of("/media/a.mkv"), "a.mkv");
     }
 }

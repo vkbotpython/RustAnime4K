@@ -147,11 +147,20 @@ impl PlayerState {
     }
 
     pub fn volume_up(&mut self, mpv: &dyn MpvBackend) {
-        self.set_volume(mpv, self.volume + 5);
+        // Mirrors MainWindow.volume_plus: step 5 with snap to the max.
+        let max = self.max_volume_self();
+        let next = if self.volume > max - 5 {
+            max
+        } else {
+            self.volume + 5
+        };
+        self.set_volume(mpv, next);
     }
 
     pub fn volume_down(&mut self, mpv: &dyn MpvBackend) {
-        self.set_volume(mpv, self.volume - 5);
+        // Mirrors MainWindow.volume_minus: step 5, snap to 0.
+        let next = if self.volume < 5 { 0 } else { self.volume - 5 };
+        self.set_volume(mpv, next);
     }
 
     /// Mirrors `Player.disable_anime4k`.
@@ -207,6 +216,25 @@ mod tests {
         let mut p2 = PlayerState::new(80, true);
         p2.set_volume(&mpv, 500);
         assert_eq!(p2.volume, MAX_VOLUME_PLUS);
+    }
+
+    #[test]
+    fn volume_step_snaps_to_max() {
+        // Mirrors MainWindow.volume_plus/volume_minus (±5, snap to max/0).
+        let mpv = MockMpv::new();
+        let mut p = PlayerState::new(96, false);
+        p.volume_up(&mpv);
+        assert_eq!(p.volume, 100);
+        p.volume_down(&mpv);
+        assert_eq!(p.volume, 95);
+
+        let mut p2 = PlayerState::new(3, false);
+        p2.volume_down(&mpv);
+        assert_eq!(p2.volume, 0);
+
+        let mut p3 = PlayerState::new(146, true);
+        p3.volume_up(&mpv);
+        assert_eq!(p3.volume, 150);
     }
 
     #[test]

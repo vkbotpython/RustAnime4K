@@ -39,6 +39,89 @@ impl Palette {
     }
 }
 
+/// Color-scheme branch, mirrors Qt `styleHints().colorScheme()`.
+/// Stored in config as `colorScheme` ("System"/"Dark"/"Light").
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+pub enum ColorScheme {
+    #[default]
+    System,
+    Dark,
+    Light,
+}
+
+impl ColorScheme {
+    #[allow(dead_code)]
+    pub fn all_names() -> &'static [&'static str] {
+        &["System", "Dark", "Light"]
+    }
+
+    pub fn from_name(name: &str) -> Self {
+        match name {
+            "Dark" => Self::Dark,
+            "Light" => Self::Light,
+            _ => Self::System,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::System => "System",
+            Self::Dark => "Dark",
+            Self::Light => "Light",
+        }
+    }
+
+    /// Resolve to concrete dark/light. `System` follows the OS theme
+    /// (via the `dark-light` crate), like Qt's `colorScheme()`.
+    pub fn is_dark(self) -> bool {
+        match self {
+            Self::Dark => true,
+            Self::Light => false,
+            Self::System => match dark_light::detect() {
+                dark_light::Mode::Light => false,
+                _ => true,
+            },
+        }
+    }
+}
+
+/// UI density styles, the egui equivalent of Qt's `QStyleFactory` themes.
+/// Stored in config as `style` (lowercased, like the Python version).
+pub mod style {
+    pub const DEFAULT: &str = "default";
+    pub const COMPACT: &str = "compact";
+    pub const SPACIOUS: &str = "spacious";
+
+    pub fn all_names() -> &'static [&'static str] {
+        &[DEFAULT, COMPACT, SPACIOUS]
+    }
+
+    pub fn normalize(name: &str) -> &'static str {
+        match name.to_lowercase().as_str() {
+            "compact" => COMPACT,
+            "spacious" => SPACIOUS,
+            _ => DEFAULT,
+        }
+    }
+
+    /// Applies spacing tweaks for the given style name.
+    pub fn apply(ctx: &egui::Context, name: &str) {
+        match normalize(name) {
+            COMPACT => ctx.all_styles_mut(|style| {
+                style.spacing.button_padding = egui::vec2(4.0, 2.0);
+                style.spacing.item_spacing = egui::vec2(4.0, 2.0);
+                style.spacing.menu_margin = egui::Margin::same(2);
+            }),
+            SPACIOUS => ctx.all_styles_mut(|style| {
+                style.spacing.button_padding = egui::vec2(10.0, 6.0);
+                style.spacing.item_spacing = egui::vec2(10.0, 6.0);
+                style.spacing.menu_margin = egui::Margin::same(8);
+            }),
+            _ => {}
+        }
+    }
+}
+
 /// Applies the palette; `dark` mirrors Qt's Light/Dark color-scheme branch.
 pub fn apply(ctx: &egui::Context, palette: Palette, dark: bool) {
     let mut visuals = if dark {

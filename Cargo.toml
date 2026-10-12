@@ -16,10 +16,9 @@ default = []
 # (Linux: apt install libmpv-dev; Windows: mpv dev files) and at runtime
 # (libmpv.so / mpv-2.dll next to the binary). Without this feature the app
 # builds and runs with a placeholder video surface (logic/UI fully testable).
-# NOTE: the render-context video widget (egui + libmpv OpenGL, same approach
-# as the old QOpenGLWidget/Video class) is the next milestone; with `video`
-# enabled today you get real audio + full property control (incl. Anime4K
-# glsl-shaders) with a placeholder surface.
+# With `video` enabled you get real audio + video (egui render context,
+# same approach as the old QOpenGLWidget/Video class) + full property
+# control (incl. Anime4K glsl-shaders).
 video = ["dep:libmpv2"]
 
 [dependencies]
@@ -32,6 +31,8 @@ anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 rfd = "0.17"
 sys-locale = "0.3"
+arboard = "2"
+dark-light = "1"
 libmpv2 = { version = "6", optional = true }
 
 [dev-dependencies]
