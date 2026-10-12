@@ -17,6 +17,8 @@ use crate::i18n::{self, Lang};
 use crate::mpv::{MpvBackend, TrackKind};
 use crate::player::{PlayerState, MIN_RESTORE_POSITION};
 use crate::theme::{self, Palette};
+#[cfg(feature = "video")]
+use crate::video::VideoRenderer;
 
 pub const APP_NAME: &str = "Anime Player";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -71,10 +73,36 @@ fn get_bool(cfg: &ConfigManager, key: &str, default: bool) -> bool {
     cfg.get(key).and_then(Value::as_bool).unwrap_or(default)
 }
 
+/// Native "open media file" dialog with video/audio filters.
+fn pick_media_file() -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .add_filter("Video", VIDEO_FORMATS)
+        .add_filter("Audio", AUDIO_FORMATS)
+        .pick_file()
+}
+
+/// Native "pick subtitle/audio sidecar file" dialog.
+fn pick_sidecar_file(kind: &TrackKind) -> Option<PathBuf> {
+    let mut dlg = rfd::FileDialog::new();
+    match kind {
+        TrackKind::Sub => {
+            dlg = dlg.add_filter("Subtitles", SUBTITLES_FORMATS);
+        }
+        TrackKind::Audio => {
+            dlg = dlg
+                .add_filter("Audio", AUDIO_FORMATS)
+                .add_filter("Video", VIDEO_FORMATS);
+        }
+    }
+    dlg.pick_file()
+}
+
 pub struct AnimePlayerApp {
     config: ConfigManager,
     lang: Lang,
     mpv: Arc<dyn MpvBackend>,
+    #[cfg(feature = "video")]
+    video: Option<VideoRenderer>,
     player: PlayerState,
     playlist_visible: bool,
     status: String,
@@ -88,13 +116,11 @@ pub struct AnimePlayerApp {
     show_launch_params: bool,
     show_android: bool,
     show_reference: bool,
-    show_file_prompt: bool,
     show_audio_menu: bool,
     show_sub_menu: bool,
 
     url_text: String,
     folder_text: String,
-    file_prompt_text: String,
     add_audio_path: String,
     add_sub_path: String,
     screenshot_dir_text: String,
@@ -122,10 +148,23 @@ impl AnimePlayerApp {
         let lang = i18n::resolve(get_str(&config, "language").as_deref());
         let volume_plus = get_bool(&config, "volumePlus", false);
         let volume = config.get("volume").and_then(Value::as_i64).unwrap_or(80) as i32;
+        #[cfg(feature = "video")]
+        let video = match mpv.mpv_handle() {
+            Some(handle) => match VideoRenderer::new(cc, handle) {
+                Ok(renderer) => Some(renderer),
+                Err(err) => {
+                    eprintln!("video renderer init failed: {err:#}");
+                    None
+                }
+            },
+            None => None,
+        };
         let mut app = Self {
             lang,
             player: PlayerState::new(volume, volume_plus),
             mpv,
+            #[cfg(feature = "video")]
+            video,
             playlist_visible: false,
             status: String::new(),
             show_settings: false,
@@ -136,12 +175,10 @@ impl AnimePlayerApp {
             show_launch_params: false,
             show_android: false,
             show_reference: false,
-            show_file_prompt: false,
             show_audio_menu: false,
             show_sub_menu: false,
             url_text: String::new(),
             folder_text: String::new(),
-            file_prompt_text: String::new(),
             add_audio_path: String::new(),
             add_sub_path: String::new(),
             screenshot_dir_text: String::new(),
@@ -278,6 +315,10 @@ impl AnimePlayerApp {
 
 impl eframe::App for AnimePlayerApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        #[cfg(feature = "video")]
+        if let Some(renderer) = self.video.as_mut() {
+            renderer.destroy_gl_resources();
+        }
         self.save_on_exit();
     }
 
@@ -331,12 +372,14 @@ impl AnimePlayerApp {
     }
 
     fn menu_bar(&mut self, ui: &mut egui::Ui) {
-        let mut open_file_dialog = false;
         egui::Panel::top("menu_bar").show(ui, |ui| {
             egui::MenuBar::new().ui(ui, |ui| {
                 ui.menu_button(self.t("File"), |ui| {
                     if ui.button(self.t("Open file")).clicked() {
-                        open_file_dialog = true;
+                        if let Some(path) = pick_media_file() {
+                            self.player.open_file(&*self.mpv, &path);
+                            self.set_opened("file", &path.to_string_lossy());
+                        }
                     }
                     if ui.button(self.t("Open URL")).clicked() {
                         self.show_open_url = true;
@@ -436,14 +479,29 @@ impl AnimePlayerApp {
                 });
             });
         });
-        if open_file_dialog {
-            // Scaffold: path typed as text; native file dialog is a later milestone.
-            self.status = self.t("Choose file");
-            self.show_file_prompt = true;
-        }
     }
 
     fn video_panel(&mut self, ui: &mut egui::Ui) {
+        #[cfg(feature = "video")]
+        if let Some(renderer) = self.video.as_mut() {
+            let status = self.status.clone();
+            egui::CentralPanel::default().show(ui, |ui| {
+                let available = ui.available_size();
+                let (rect, _resp) = ui.allocate_exact_size(available, egui::Sense::click());
+                ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
+                renderer.show(ui, rect);
+                if !status.is_empty() {
+                    ui.painter().text(
+                        rect.left_bottom() + egui::vec2(8.0, -8.0),
+                        egui::Align2::LEFT_BOTTOM,
+                        status,
+                        egui::FontId::proportional(13.0),
+                        egui::Color32::LIGHT_GRAY,
+                    );
+                }
+            });
+            return;
+        }
         egui::CentralPanel::default().show(ui, |ui| {
             let available = ui.available_size();
             let (rect, _resp) = ui.allocate_exact_size(available, egui::Sense::click());
@@ -609,11 +667,17 @@ impl AnimePlayerApp {
             }
             ui.horizontal(|ui| {
                 ui.label(add_label);
+                let choose_file = self.t("Choose file");
                 let path_field = match kind {
                     TrackKind::Audio => &mut self.add_audio_path,
                     TrackKind::Sub => &mut self.add_sub_path,
                 };
                 ui.text_edit_singleline(path_field);
+                if ui.button(choose_file).clicked() {
+                    if let Some(picked) = pick_sidecar_file(&kind) {
+                        *path_field = picked.to_string_lossy().into_owned();
+                    }
+                }
                 let path = path_field.trim().to_string();
                 if ui.button(select).clicked() && !path.is_empty() {
                     match kind {
@@ -695,7 +759,6 @@ impl AnimePlayerApp {
 
 impl AnimePlayerApp {
     fn dialogs(&mut self, ctx: &egui::Context) {
-        self.file_prompt_dialog(ctx);
         self.settings_dialog(ctx);
         self.about_dialog(ctx);
         self.open_url_dialog(ctx);
@@ -704,42 +767,6 @@ impl AnimePlayerApp {
         self.launch_params_dialog(ctx);
         self.android_dialog(ctx);
         self.reference_dialog(ctx);
-    }
-
-    fn file_prompt_dialog(&mut self, ctx: &egui::Context) {
-        if !self.show_file_prompt {
-            return;
-        }
-        let title = self.t("Open file");
-        let choose = self.t("Choose file");
-        let select = self.t("Select");
-        let err = self.t("Error");
-        let video_filter = format!("*.{}", VIDEO_FORMATS.join(", *."));
-        let audio_filter = format!("*.{}", AUDIO_FORMATS.join(", *."));
-        let sub_filter = format!("*.{}", SUBTITLES_FORMATS.join(", *."));
-        let mut open = self.show_file_prompt;
-        let mut chosen: Option<String> = None;
-        egui::Window::new(title).open(&mut open).show(ctx, |ui| {
-            ui.label(choose);
-            ui.text_edit_singleline(&mut self.file_prompt_text);
-            ui.monospace(video_filter);
-            ui.monospace(audio_filter);
-            ui.monospace(sub_filter);
-            if ui.button(select).clicked() && !self.file_prompt_text.trim().is_empty() {
-                chosen = Some(self.file_prompt_text.trim().to_string());
-            }
-        });
-        self.show_file_prompt = open;
-        if let Some(p) = chosen {
-            let path = Path::new(&p);
-            if path.is_file() {
-                self.player.open_file(&*self.mpv, path);
-                self.set_opened("file", &p);
-            } else {
-                self.status = format!("{err}: {p}");
-            }
-            self.show_file_prompt = false;
-        }
     }
 
     fn settings_dialog(&mut self, ctx: &egui::Context) {
@@ -921,10 +948,17 @@ impl AnimePlayerApp {
         egui::Window::new(title).open(&mut open).show(ctx, |ui| {
             ui.label(prompt);
             ui.text_edit_singleline(&mut self.folder_text);
-            if ui.button(clear).clicked() {
-                self.config
-                    .set("foldersHistory", json!(Vec::<String>::new()));
-            }
+            ui.horizontal(|ui| {
+                if ui.button(self.t("Select")).clicked() {
+                    if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                        self.folder_text = dir.to_string_lossy().into_owned();
+                    }
+                }
+                if ui.button(clear).clicked() {
+                    self.config
+                        .set("foldersHistory", json!(Vec::<String>::new()));
+                }
+            });
             for folder in &history {
                 if let Some(folder) = folder.as_str() {
                     if ui.link(folder).clicked() {
@@ -971,16 +1005,23 @@ impl AnimePlayerApp {
         egui::Window::new(title).open(&mut open).show(ctx, |ui| {
             ui.label(prompt);
             ui.text_edit_singleline(&mut self.screenshot_dir_text);
-            if ui.button(save).clicked() {
-                let dir = self.screenshot_dir_text.trim().to_string();
-                if !dir.is_empty() {
-                    self.mpv.set_screenshot_directory(&dir);
-                    self.mpv.screenshot();
-                    done = true;
-                } else {
-                    failed = true;
+            ui.horizontal(|ui| {
+                if ui.button(self.t("Select")).clicked() {
+                    if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                        self.screenshot_dir_text = dir.to_string_lossy().into_owned();
+                    }
                 }
-            }
+                if ui.button(save).clicked() {
+                    let dir = self.screenshot_dir_text.trim().to_string();
+                    if !dir.is_empty() {
+                        self.mpv.set_screenshot_directory(&dir);
+                        self.mpv.screenshot();
+                        done = true;
+                    } else {
+                        failed = true;
+                    }
+                }
+            });
         });
         if failed {
             self.status = err;

@@ -9,6 +9,8 @@ mod mpv;
 mod player;
 mod playlist;
 mod theme;
+#[cfg(feature = "video")]
+mod video;
 
 use std::sync::Arc;
 

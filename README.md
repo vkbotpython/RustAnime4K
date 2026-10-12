@@ -28,7 +28,9 @@ src/
   app.rs       main window + 9 dialogs        <- MainWindow + *Window classes
   player.rs    playlist/current/volume logic  <- class Player
   mpv.rs       MpvBackend trait + MockMpv     <- mpv.py (ctypes)
-               + LibMpv (--features video)
+               + LibMpv + track-list (--features video)
+  video.rs     libmpv OpenGL render ctx        <- class Video(QOpenGLWidget)
+               → egui surface (--features video)
   config.rs    JSON config                    <- config.py
   anime4k.rs   shader presets                 <- anime4k.py
   i18n.rs      locales                        <- localization.py
@@ -53,7 +55,9 @@ cargo run -- <file>   # open a file/folder/URL directly
 ### With real playback (`video` feature)
 
 Uses `libmpv` directly (same embedding model as the Python build:
-`keep-open`, `gpu-hq` profile, `glsl-shaders` for Anime4K).
+`keep-open`, `gpu-hq` profile, `glsl-shaders` for Anime4K, `vo=libmpv` with an
+OpenGL render context blitted onto the egui surface — the equivalent of the
+old `Video(QOpenGLWidget)` class).
 
 Linux:
 
@@ -62,18 +66,14 @@ sudo apt install libmpv-dev
 cargo run --features video
 ```
 
-Windows: install mpv development files and put `mpv-2.dll` next to the
-binary (shipped separately, as with the Python releases), then:
+Windows: you need an import library + DLL pair named `mpv.lib` / `mpv.dll`
+(`libmpv2-sys` links `cargo:rustc-link-lib=mpv`). The official mpv builds
+ship `libmpv-2.dll`, so either generate the import lib from it or use a
+package that provides `mpv.lib` (e.g. vcpkg), then:
 
 ```powershell
 cargo run --features video
 ```
-
-> Video rendering note: with `video` enabled you get real audio + full mpv
-> property control today; the OpenGL render-context widget inside the egui
-> surface (the equivalent of the old `Video(QOpenGLWidget)` class, same
-> approach as `egui-sharkplayer`) is the next milestone — the surface
-> currently shows a placeholder.
 
 ### Safe launch parameters
 
@@ -97,10 +97,11 @@ audio-delay=0.15
 
 ## Roadmap
 
-1. ✅ Scaffold: logic/UI/CI in repo root (this state)
-2. Render-context video widget (`libmpv` OpenGL → egui surface)
-3. Native file dialogs, tray/fullscreen cursor polish, file associations
-4. mpv track-list parsing for audio/sub menus under `video`
+1. ✅ Scaffold: logic/UI/CI in repo root
+2. ✅ Render-context video widget (`libmpv` OpenGL → egui surface)
+3. ✅ Native file dialogs (`rfd`), track-list parsing, installer associations
+4. Runtime verification of `--features video` on a machine with libmpv
+   (Linux CI covers compile; link needs `libmpv-dev`)
 5. Delete `AnimePlayer/` reference tree
 
 ## License

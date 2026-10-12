@@ -90,6 +90,12 @@ pub trait MpvBackend: Send + Sync {
     fn add_sub_file(&self, path: &str);
     fn add_audio_file(&self, path: &str);
     fn mpv_version(&self) -> String;
+    /// Raw libmpv handle for the GPU render context (`video` feature).
+    /// Returns `None` for backends without libmpv (mock).
+    #[cfg(feature = "video")]
+    fn mpv_handle(&self) -> Option<std::sync::Arc<libmpv2::Mpv>> {
+        None
+    }
 }
 
 #[derive(Debug, Default)]
@@ -262,7 +268,7 @@ impl MpvBackend for MockMpv {
 /// Only needs `LC_NUMERIC=C`; libmpv2 handles the rest.
 #[cfg(feature = "video")]
 pub struct LibMpv {
-    inner: libmpv2::Mpv,
+    inner: std::sync::Arc<libmpv2::Mpv>,
 }
 
 #[cfg(feature = "video")]
@@ -278,9 +284,13 @@ impl LibMpv {
             init.set_option("keep-open", "yes")?;
             init.set_option("profile", "gpu-hq")?;
             init.set_option("terminal", "yes")?;
+            // Render API mode: frames go to our egui surface (see video.rs).
+            init.set_option("vo", "libmpv")?;
             Ok(())
         })?;
-        Ok(Self { inner: mpv })
+        Ok(Self {
+            inner: std::sync::Arc::new(mpv),
+        })
     }
 
     fn get_opt<T: libmpv2::GetData>(&self, name: &str) -> Option<T> {
@@ -395,9 +405,50 @@ impl MpvBackend for LibMpv {
         self.get_opt("frame-drop-count")
     }
     fn tracks(&self) -> Vec<Track> {
-        // track-list is a node; keep the port minimal and skip parsing here.
-        // Full track menus land with the video-feature UI milestone.
-        Vec::new()
+        // `track-list` is a node property; read it back through the indexed
+        // scalar aliases (`track-list/0/type`, ...) instead.
+        let count: i64 = self.get_opt("track-list/count").unwrap_or(0);
+        let mut out = Vec::new();
+        for i in 0..count.min(64) {
+            let base = format!("track-list/{i}");
+            let ty: String = match self.get_opt(&format!("{base}/type")) {
+                Some(ty) => ty,
+                None => continue,
+            };
+            let kind = match ty.as_str() {
+                "audio" => TrackKind::Audio,
+                "sub" => TrackKind::Sub,
+                _ => continue,
+            };
+            let id: i64 = match self.get_opt(&format!("{base}/id")) {
+                Some(id) => id,
+                None => continue,
+            };
+            let codec: String = self.get_opt(&format!("{base}/codec")).unwrap_or_default();
+            let lang: Option<String> = self.get_opt(&format!("{base}/lang"));
+            let title: Option<String> = self.get_opt(&format!("{base}/title"));
+            let (channels, samplerate) = if kind == TrackKind::Audio {
+                let channels: Option<String> = self
+                    .get_opt::<i64>(&format!("{base}/audio-channels"))
+                    .map(|c| c.to_string());
+                let samplerate: Option<String> = self
+                    .get_opt::<f64>(&format!("{base}/demux-samplerate"))
+                    .map(|s| format!("{s:.0}"));
+                (channels, samplerate)
+            } else {
+                (None, None)
+            };
+            out.push(Track {
+                id,
+                kind,
+                codec,
+                lang,
+                title,
+                channels,
+                samplerate,
+            });
+        }
+        out
     }
     fn set_audio_track(&self, id: i64) {
         let _ = self.inner.set_property("aid", id);
@@ -414,6 +465,11 @@ impl MpvBackend for LibMpv {
     fn mpv_version(&self) -> String {
         self.get_opt::<String>("mpv-version")
             .unwrap_or_else(|| "mpv".to_string())
+    }
+
+    #[cfg(feature = "video")]
+    fn mpv_handle(&self) -> Option<std::sync::Arc<libmpv2::Mpv>> {
+        Some(std::sync::Arc::clone(&self.inner))
     }
 }
 
