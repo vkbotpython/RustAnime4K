@@ -1075,6 +1075,31 @@ impl AnimePlayerApp {
 
     fn controls_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("controls").show(ui, |ui| {
+            let duration = self.mpv.duration().unwrap_or(0.0);
+            let pos = self.mpv.time_pos().unwrap_or(0.0);
+            let max = (duration * TIME_SCALE).max(1.0);
+            let mut slider_val = pos * TIME_SCALE;
+
+            // Row 1: full-width seek bar, times pinned to the window edges.
+            ui.horizontal(|ui| {
+                ui.monospace(fmt_time(pos));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.monospace(fmt_time(duration));
+                    ui.spacing_mut().slider_width = ui.available_width();
+                    let resp = ui
+                        .add(
+                            egui::Slider::new(&mut slider_val, 0.0..=max)
+                                .show_value(false)
+                                .trailing_fill(true)
+                                // Mirrors Qt `pageStep 5` (5 / TIME_SCALE 10 = 0.5 s).
+                                .step_by(0.5),
+                        )
+                        .on_hover_text(format!("{} / {}", fmt_time(pos), fmt_time(duration)));
+                    if resp.changed() {
+                        self.mpv.set_time_pos(slider_val / TIME_SCALE);
+                    }
+                });
+            });
             ui.horizontal(|ui| {
                 if ui
                     .button("⏮")
@@ -1120,18 +1145,6 @@ impl AnimePlayerApp {
                 if ui.button("☰").on_hover_text(self.t("Menu")).clicked() {
                     self.playlist_visible = !self.playlist_visible;
                 }
-
-                let duration = self.mpv.duration().unwrap_or(0.0);
-                let pos = self.mpv.time_pos().unwrap_or(0.0);
-                let max = (duration * TIME_SCALE).max(1.0);
-                let mut slider_val = pos * TIME_SCALE;
-                let resp = ui
-                    .add(egui::Slider::new(&mut slider_val, 0.0..=max).show_value(false))
-                    .on_hover_text(format!("{} / {}", fmt_time(pos), fmt_time(duration)));
-                if resp.changed() {
-                    self.mpv.set_time_pos(slider_val / TIME_SCALE);
-                }
-                ui.monospace(format!("{} / {}", fmt_time(pos), fmt_time(duration)));
 
                 let mut vol = self.mpv.volume();
                 let vmax = self.player.max_volume_self();
