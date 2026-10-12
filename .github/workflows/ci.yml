@@ -79,6 +79,22 @@ jobs:
 
       - run: cargo build --release
 
+      - name: Loader smoke test (Windows)
+        if: runner.os == 'Windows'
+        run: ./target/release/anime-player.exe --help
+
+      - name: Loader smoke test + ldd audit (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          ./target/release/anime-player --help
+          echo '--- ldd ---'
+          ldd target/release/anime-player
+          echo '--- DT_NEEDED ---'
+          readelf -d target/release/anime-player | grep NEEDED
+          if ldd target/release/anime-player | grep -q 'not found'; then
+            echo 'ERROR: missing shared libraries'; exit 1
+          fi
+
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
