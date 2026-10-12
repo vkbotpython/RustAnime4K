@@ -305,7 +305,9 @@ impl LibMpv {
             init.set_option("audio-display", "no")?;
             init.set_option("keep-open", "yes")?;
             init.set_option("profile", "gpu-hq")?;
-            init.set_option("terminal", "yes")?;
+            // No terminal UI: this is a GUI app without a console window,
+            // so mpv must not print status lines / logs to stdout.
+            init.set_option("terminal", "no")?;
             // URL playback (mirrors python-mpv `ytdl=True`); ignore the error
             // on builds without youtube-dl support so init still succeeds.
             let _ = init.set_option("ytdl", "yes");

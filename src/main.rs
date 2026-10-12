@@ -1,5 +1,8 @@
 //! Anime Player — Rust port: video player with Anime4K upscaling.
 
+// Hide the console window on Windows (GUI app; mpv logs don't need a terminal).
+#![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
+
 mod anime4k;
 mod app;
 mod config;
@@ -37,6 +40,18 @@ fn create_backend() -> Arc<dyn MpvBackend> {
     Arc::new(mpv::MockMpv::new())
 }
 
+/// Title-bar / taskbar icon, embedded at compile time so it works without
+/// the `assets/` folder next to the exe. Falls back to the default icon
+/// if the PNG ever fails to decode.
+fn load_app_icon() -> Arc<egui::IconData> {
+    eframe::icon_data::from_png_bytes(include_bytes!("../assets/images/anime-player-icon.png"))
+        .map(Arc::new)
+        .unwrap_or_else(|err| {
+            eprintln!("cannot decode app icon: {err:#}");
+            Arc::new(egui::IconData::default())
+        })
+}
+
 fn main() -> eframe::Result<()> {
     let cli = Cli::parse();
     let backend = create_backend();
@@ -44,7 +59,8 @@ fn main() -> eframe::Result<()> {
     let viewport = egui::ViewportBuilder::default()
         .with_title(APP_NAME)
         .with_min_inner_size([800.0, 600.0])
-        .with_inner_size([1100.0, 700.0]);
+        .with_inner_size([1100.0, 700.0])
+        .with_icon(load_app_icon());
 
     let options = eframe::NativeOptions {
         viewport,
