@@ -4,7 +4,7 @@
 ; (Linux CI uses libmpv-dev; see README).
 
 #define MyAppName "Anime Player"
-#define MyAppVersion "2.3.3"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "Denis Mazur"
 #define MyAppURL "https://github.com/Communist02/AnimePlayer"
 #define MyAppExeName "anime-player.exe"

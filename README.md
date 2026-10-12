@@ -95,15 +95,6 @@ audio-delay=0.15
   builds the Inno Setup installer on Windows, and publishes a GitHub Release
   with portable archives.
 
-## Roadmap
-
-1. ✅ Scaffold: logic/UI/CI in repo root
-2. ✅ Render-context video widget (`libmpv` OpenGL → egui surface)
-3. ✅ Native file dialogs (`rfd`), track-list parsing, installer associations
-4. Runtime verification of `--features video` on a machine with libmpv
-   (Linux CI covers compile; link needs `libmpv-dev`)
-5. Delete `AnimePlayer/` reference tree
-
 ## License
 
 GPL-3.0-or-later, same as the original. See `LICENSE`.
