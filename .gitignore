@@ -14,6 +14,9 @@ target/
 dist/
 packaging/windows/Output/
 
+# Local libmpv import lib (regenerate via release.yml procedure / README)
+mpvlib-local/
+
 # Legacy Python reference tree (behavioral reference only, will be removed
 # once the Rust port reaches parity)
 AnimePlayer/
