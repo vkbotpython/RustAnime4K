@@ -17,7 +17,7 @@
   "Settings": "Настройки",
   "Quality": "Качество",
   "Mode": "Режим",
-  "About program": "Видеоплеер, написанный на языке программирования Python с использованием библиотеки графического пользовательского интерфейса PySide 6, мультимедийного проигрывателя mpv и алгоритма масштабирования Anime4K",
+  "About program": "Видеоплеер, написанный на языке программирования Rust с использованием графического интерфейса egui, мультимедийного проигрывателя libmpv и алгоритма масштабирования Anime4K.\n\nАвтор Rust-порта: avencores",
   "Activate SVP": "Активировать SVP",
   "Create config for Android": "Создать конфиг для Android",
   "Play": "Играть",
@@ -86,5 +86,8 @@
   "Theme style": "Стиль интерфейса",
   "Color scheme": "Цветовая схема",
   "Sound offset": "Задержка звука (секунды)",
-  "Fixed multimedia control panel": "Фиксированная панель контроля мультимедиа"
+  "Fixed multimedia control panel": "Фиксированная панель контроля мультимедиа",
+  "Offer to choose an Anime4K preset when opening a file": "Предлагать выбрать пресет Anime4K при открытии файла",
+  "Choose an Anime4K preset": "Выберите пресет Anime4K",
+  "Don't ask again": "Больше не спрашивать"
 }

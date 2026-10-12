@@ -17,7 +17,7 @@
   "Settings": "設定",
   "Quality": "品質",
   "Mode": "モード",
-  "About program": "PySide 6 ライブラリ、mpv メディア プレーヤー、Anime4K スケーリング アルゴリズムを使用して Python プログラミング言語で記述されたメディア プレーヤー",
+  "About program": "eguiグラフィカルインターフェース、libmpvメディアプレーヤー、Anime4Kスケーリングアルゴリズムを使用してRustプログラミング言語で記述されたビデオプレーヤー。\n\nRust移植版の作者: avencores",
   "Activate SVP": "Activate SVP",
   "Create config for Android": "Android用の設定を作成",
   "Play": "再生",
@@ -86,5 +86,8 @@
   "Theme style": "インターフェーススタイル",
   "Color scheme": "カラースキーム",
   "Sound offset": "サウンドオフセット (秒)",
-  "Fixed multimedia control panel": "Fixed multimedia control panel"
+  "Fixed multimedia control panel": "Fixed multimedia control panel",
+  "Offer to choose an Anime4K preset when opening a file": "ファイルを開くときにAnime4Kプリセットの選択を提案する",
+  "Choose an Anime4K preset": "Anime4K プリセットの選択",
+  "Don't ask again": "今後表示しない"
 }

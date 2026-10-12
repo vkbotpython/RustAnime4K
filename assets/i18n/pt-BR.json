@@ -17,7 +17,7 @@
   "Settings": "Configurações",
   "Quality": "Qualidade",
   "Mode": "Modo",
-  "About program": "Media player escrito em Python usando a biblioteca PySide 6, o reprodutor mpv e o algoritmo de escalonamento Anime4K",
+  "About program": "Reprodutor de vídeo escrito na linguagem de programação Rust usando a interface gráfica egui, o reprodutor de mídia libmpv e o algoritmo de escalonamento Anime4K.\n\nAutor do porte Rust: avencores",
   "Activate SVP": "Ativar SVP",
   "Create config for Android": "Criar configuração para Android",
   "Play": "Reproduzir",
@@ -86,5 +86,8 @@
   "Theme style": "Estilo da interface",
   "Color scheme": "Esquema de cores",
   "Sound offset": "Deslocamento de som (segundos)",
-  "Fixed multimedia control panel": "Fixed multimedia control panel"
+  "Fixed multimedia control panel": "Fixed multimedia control panel",
+  "Offer to choose an Anime4K preset when opening a file": "Oferecer escolha de predefinição Anime4K ao abrir arquivo",
+  "Choose an Anime4K preset": "Escolher predefinição Anime4K",
+  "Don't ask again": "Não perguntar novamente"
 }

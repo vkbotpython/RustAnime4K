@@ -170,6 +170,7 @@ pub struct AnimePlayerApp {
     show_reference: bool,
     show_audio_menu: bool,
     show_sub_menu: bool,
+    show_preset_offer: bool,
 
     url_text: String,
     folder_text: String,
@@ -186,10 +187,16 @@ pub struct AnimePlayerApp {
     settings_volume_plus: bool,
     settings_svp: bool,
     settings_fixed_panel: bool,
+    settings_ask_preset: bool,
     settings_sound_offset: f64,
     settings_palette: Palette,
     settings_style: String,
     settings_scheme: ColorScheme,
+
+    // Anime4K preset offer dialog drafts (quality/mode to apply on choice).
+    preset_offer_quality: String,
+    preset_offer_mode: String,
+    preset_offer_dont_ask: bool,
 
     // Fullscreen mouse tracking (mirrors mouseMoveEvent/update_cursor).
     last_mouse_pos: Option<egui::Pos2>,
@@ -238,6 +245,7 @@ impl AnimePlayerApp {
             show_reference: false,
             show_audio_menu: false,
             show_sub_menu: false,
+            show_preset_offer: false,
             url_text: String::new(),
             folder_text: String::new(),
             add_audio_path: String::new(),
@@ -252,6 +260,7 @@ impl AnimePlayerApp {
             settings_volume_plus: volume_plus,
             settings_svp: get_bool(&config, "SVP", false),
             settings_fixed_panel: get_bool(&config, "fixedControlPanel", false),
+            settings_ask_preset: get_bool(&config, "askPresetOnOpen", true),
             settings_sound_offset: config
                 .get("soundOffset")
                 .and_then(Value::as_f64)
@@ -268,6 +277,9 @@ impl AnimePlayerApp {
                     .as_deref()
                     .unwrap_or("System"),
             ),
+            preset_offer_quality: "M".to_string(),
+            preset_offer_mode: "A".to_string(),
+            preset_offer_dont_ask: false,
             config,
             last_mouse_pos: None,
             last_mouse_time: Instant::now(),
@@ -316,44 +328,45 @@ impl AnimePlayerApp {
         if let Some(path) = pick_media_file() {
             self.player.open_file(&*self.mpv, &path);
             self.set_opened("file", &path.to_string_lossy());
-            self.refresh_title(ctx);
+            self.after_file_changed(ctx);
         }
     }
 
     fn do_open_url(&mut self, ctx: &egui::Context, link: &str) {
         self.player.open_url(&*self.mpv, link);
         self.set_opened("url", link);
-        self.refresh_title(ctx);
+        self.after_file_changed(ctx);
     }
 
     fn do_open_folder(&mut self, ctx: &egui::Context, folder: &Path) {
         self.playlist_visible = true;
         self.player.open_folder(&*self.mpv, folder, None);
         self.set_opened("folder", &folder.to_string_lossy());
-        self.refresh_title(ctx);
+        self.after_file_changed(ctx);
     }
 
     fn do_close(&mut self, ctx: &egui::Context) {
         self.player.close(&*self.mpv);
         self.config.set("opened", json!(["", ""]));
+        self.show_preset_offer = false;
         self.refresh_title(ctx);
     }
 
     fn do_next(&mut self, ctx: &egui::Context) {
         if self.player.next(&*self.mpv) {
-            self.refresh_title(ctx);
+            self.after_file_changed(ctx);
         }
     }
 
     fn do_prev(&mut self, ctx: &egui::Context) {
         if self.player.prev(&*self.mpv) {
-            self.refresh_title(ctx);
+            self.after_file_changed(ctx);
         }
     }
 
     fn do_play_index(&mut self, ctx: &egui::Context, index: usize) {
         if self.player.play_index(&*self.mpv, index) {
-            self.refresh_title(ctx);
+            self.after_file_changed(ctx);
         }
     }
 
@@ -366,6 +379,7 @@ impl AnimePlayerApp {
         self.settings_volume_plus = get_bool(&self.config, "volumePlus", false);
         self.settings_svp = get_bool(&self.config, "SVP", false);
         self.settings_fixed_panel = get_bool(&self.config, "fixedControlPanel", false);
+        self.settings_ask_preset = get_bool(&self.config, "askPresetOnOpen", true);
         self.settings_sound_offset = self
             .config
             .get("soundOffset")
@@ -503,7 +517,7 @@ impl AnimePlayerApp {
             return;
         }
         if pressed(Key::D, Modifiers::NONE) {
-            self.player.disable_anime4k(&*self.mpv);
+            self.disable_anime4k();
             return;
         }
         if pressed(Key::Num0, Modifiers::NONE) {
@@ -581,6 +595,7 @@ impl AnimePlayerApp {
                 self.player.open_url(&*self.mpv, &arg);
             }
             self.apply_runtime_settings();
+            self.note_file_changed();
             return;
         }
         let open_last = get_bool(&self.config, "onOpenLastFile", true);
@@ -623,6 +638,7 @@ impl AnimePlayerApp {
             }
         }
         self.apply_runtime_settings();
+        self.note_file_changed();
     }
 
     fn apply_runtime_settings(&mut self) {
@@ -663,6 +679,131 @@ impl AnimePlayerApp {
 
     fn set_opened(&mut self, kind: &str, target: &str) {
         self.config.set("opened", json!([kind, target]));
+    }
+
+    /// Storage key for the current file (full path or URL), if any.
+    fn current_file_key(&self) -> Option<String> {
+        self.player
+            .current_file()
+            .map(|p| p.to_string_lossy().into_owned())
+    }
+
+    fn read_file_preset(&self, key: &str) -> Option<PresetChoice> {
+        self.config
+            .get("filePresets")?
+            .get(key)
+            .and_then(PresetChoice::from_json)
+    }
+
+    fn write_file_preset(&mut self, key: &str, choice: &PresetChoice) {
+        let mut map = self
+            .config
+            .get("filePresets")
+            .and_then(Value::as_object)
+            .cloned()
+            .unwrap_or_default();
+        map.insert(key.to_string(), choice.to_json());
+        self.config.set("filePresets", Value::Object(map));
+    }
+
+    /// Applies a stored choice without re-saving it.
+    /// Returns false when it can't be built (stale data).
+    fn apply_choice(&mut self, choice: &PresetChoice) -> bool {
+        match choice {
+            PresetChoice::Disabled => {
+                self.player.disable_anime4k(&*self.mpv);
+                true
+            }
+            PresetChoice::Standard { quality, mode } => {
+                match anime4k::create_preset(quality, mode) {
+                    Ok(preset) => {
+                        let value = anime4k::preset_to_glsl_shaders(&shaders_dir(), &preset);
+                        self.player.apply_preset(
+                            &*self.mpv,
+                            &format!("{mode} ({quality})"),
+                            &value,
+                        );
+                        true
+                    }
+                    Err(_) => false,
+                }
+            }
+            PresetChoice::Hq { name } => match anime4k::ultra_hq_presets().get(name.as_str()) {
+                Some(preset) => {
+                    let value = anime4k::preset_to_glsl_shaders(&shaders_dir(), preset);
+                    self.player
+                        .apply_preset(&*self.mpv, &format!("{name} (HQ)"), &value);
+                    true
+                }
+                None => false,
+            },
+        }
+    }
+
+    /// Called whenever the current file changes (or playback starts from
+    /// scratch): applies the saved per-file preset, otherwise offers to
+    /// choose one (unless the user opted out).
+    fn note_file_changed(&mut self) {
+        let Some(key) = self.current_file_key() else {
+            self.show_preset_offer = false;
+            return;
+        };
+        let ask = get_bool(&self.config, "askPresetOnOpen", true);
+        match self.read_file_preset(&key) {
+            Some(choice) if self.apply_choice(&choice) => {
+                self.show_preset_offer = false;
+            }
+            _ => {
+                self.show_preset_offer = ask;
+            }
+        }
+        if self.show_preset_offer {
+            self.preset_offer_dont_ask = false;
+        }
+    }
+
+    fn after_file_changed(&mut self, ctx: &egui::Context) {
+        self.refresh_title(ctx);
+        self.note_file_changed();
+    }
+}
+
+/// Per-file Anime4K choice stored under config `filePresets`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PresetChoice {
+    Standard { quality: String, mode: String },
+    Hq { name: String },
+    Disabled,
+}
+
+impl PresetChoice {
+    fn to_json(&self) -> Value {
+        match self {
+            Self::Standard { quality, mode } => json!({"quality": quality, "mode": mode}),
+            Self::Hq { name } => json!({"hq": name}),
+            Self::Disabled => json!({"disabled": true}),
+        }
+    }
+
+    fn from_json(v: &Value) -> Option<Self> {
+        if v.get("disabled").and_then(Value::as_bool).unwrap_or(false) {
+            return Some(Self::Disabled);
+        }
+        if let Some(name) = v.get("hq").and_then(Value::as_str) {
+            return Some(Self::Hq {
+                name: name.to_string(),
+            });
+        }
+        match (
+            v.get("quality").and_then(Value::as_str),
+            v.get("mode").and_then(Value::as_str),
+        ) {
+            (Some(quality), Some(mode)) => Some(Self::Standard {
+                quality: quality.to_string(),
+                mode: mode.to_string(),
+            }),
+            _ => None,
+        }
     }
 }
 
@@ -805,7 +946,7 @@ impl AnimePlayerApp {
                 });
                 ui.menu_button(self.t("Increasing image quality"), |ui| {
                     if ui.button(self.t("Disable")).clicked() {
-                        self.player.disable_anime4k(&*self.mpv);
+                        self.disable_anime4k();
                     }
                     for quality in anime4k::QUALITIES {
                         ui.menu_button(format!("{} {quality}", self.t("Quality")), |ui| {
@@ -881,7 +1022,7 @@ impl AnimePlayerApp {
         ui.separator();
         ui.menu_button(self.t("Increasing image quality"), |ui| {
             if ui.button(self.t("Disable")).clicked() {
-                self.player.disable_anime4k(&*self.mpv);
+                self.disable_anime4k();
                 ui.close();
             }
             for quality in anime4k::QUALITIES {
@@ -1286,6 +1427,8 @@ impl AnimePlayerApp {
             if let Some(file) = self.player.current_file().cloned() {
                 self.mpv.play(&file.to_string_lossy());
                 self.mpv.set_pause(false);
+                // Playback (re)starts from scratch: offer a preset if needed.
+                self.note_file_changed();
             }
         } else {
             self.mpv.set_pause(!self.mpv.pause());
@@ -1297,22 +1440,52 @@ impl AnimePlayerApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.player.fullscreen));
     }
 
+    /// Explicit user choice: apply a standard preset and remember it
+    /// for the current file.
     fn apply_anime4k(&mut self, quality: &str, mode: &str) {
         match anime4k::create_preset(quality, mode) {
             Ok(preset) => {
                 let value = anime4k::preset_to_glsl_shaders(&shaders_dir(), &preset);
                 let name = format!("{mode} ({quality})");
                 self.player.apply_preset(&*self.mpv, &name, &value);
+                if let Some(key) = self.current_file_key() {
+                    self.write_file_preset(
+                        &key,
+                        &PresetChoice::Standard {
+                            quality: quality.to_string(),
+                            mode: mode.to_string(),
+                        },
+                    );
+                }
             }
             Err(err) => self.status = format!("{}: {err:#}", self.t("Error")),
         }
     }
 
+    /// Explicit user choice: apply an HQ preset and remember it
+    /// for the current file.
     fn apply_anime4k_hq(&mut self, name: &str) {
         if let Some(preset) = anime4k::ultra_hq_presets().get(name) {
             let value = anime4k::preset_to_glsl_shaders(&shaders_dir(), preset);
             let label = format!("{name} (HQ)");
             self.player.apply_preset(&*self.mpv, &label, &value);
+            if let Some(key) = self.current_file_key() {
+                self.write_file_preset(
+                    &key,
+                    &PresetChoice::Hq {
+                        name: name.to_string(),
+                    },
+                );
+            }
+        }
+    }
+
+    /// Explicit user choice: disable Anime4K and remember it
+    /// for the current file.
+    fn disable_anime4k(&mut self) {
+        self.player.disable_anime4k(&*self.mpv);
+        if let Some(key) = self.current_file_key() {
+            self.write_file_preset(&key, &PresetChoice::Disabled);
         }
     }
 }
@@ -1325,6 +1498,7 @@ impl AnimePlayerApp {
     fn dialogs(&mut self, ctx: &egui::Context) {
         self.settings_dialog(ctx);
         self.about_dialog(ctx);
+        self.preset_offer_dialog(ctx);
         self.open_url_dialog(ctx);
         self.open_folder_dialog(ctx);
         self.screenshot_dialog(ctx);
@@ -1344,6 +1518,7 @@ impl AnimePlayerApp {
         let volume_plus_label = self.t("Increase maximum volume up to 150%");
         let svp_label = self.t("Activate SVP");
         let fixed_label = self.t("Fixed multimedia control panel");
+        let ask_preset_label = self.t("Offer to choose an Anime4K preset when opening a file");
         let offset_label = self.t("Sound offset");
         let palette_label = self.t("Palette");
         let style_label = self.t("Theme style");
@@ -1380,6 +1555,7 @@ impl AnimePlayerApp {
                 ui.checkbox(&mut self.settings_volume_plus, volume_plus_label);
                 ui.checkbox(&mut self.settings_svp, svp_label);
                 ui.checkbox(&mut self.settings_fixed_panel, fixed_label);
+                ui.checkbox(&mut self.settings_ask_preset, ask_preset_label);
                 ui.horizontal(|ui| {
                     ui.label(offset_label);
                     // Mirrors QDoubleSpinBox -100..100 step 0.01.
@@ -1468,6 +1644,8 @@ impl AnimePlayerApp {
             .set("volumePlus", json!(self.settings_volume_plus));
         self.config
             .set("fixedControlPanel", json!(self.settings_fixed_panel));
+        self.config
+            .set("askPresetOnOpen", json!(self.settings_ask_preset));
         self.settings_sound_offset = self.settings_sound_offset.clamp(-100.0, 100.0);
         self.config
             .set("soundOffset", json!(self.settings_sound_offset));
@@ -1538,6 +1716,132 @@ impl AnimePlayerApp {
                 });
             });
         self.show_about = open;
+    }
+
+    /// Offered when a video starts and the file has no saved preset:
+    /// choose an Anime4K preset or disable it entirely. The choice is
+    /// remembered per file (`filePresets`); closing without choosing
+    /// asks again on the next file.
+    fn preset_offer_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_preset_offer {
+            return;
+        }
+        let Some(current) = self.player.current_file().cloned() else {
+            self.show_preset_offer = false;
+            return;
+        };
+        let title = self.t("Choose an Anime4K preset");
+        let quality_label = self.t("Quality");
+        let mode_label = self.t("Mode");
+        let apply_label = self.t("Apply");
+        let disable_label = self.t("Disable");
+        let dont_ask_label = self.t("Don't ask again");
+        let name = display_name_of(&current.to_string_lossy());
+
+        // Modes depend on the selected quality (standard 6 vs HQ list).
+        let hq_names: Vec<String> = anime4k::ultra_hq_presets()
+            .keys()
+            .map(|s| s.to_string())
+            .collect();
+        let mut hq_names = hq_names;
+        hq_names.sort();
+        let is_hq = self.preset_offer_quality == "HQ";
+        if is_hq {
+            if !hq_names.contains(&self.preset_offer_mode) {
+                self.preset_offer_mode = hq_names.first().cloned().unwrap_or_default();
+            }
+        } else {
+            if !anime4k::MODES.contains(&self.preset_offer_mode.as_str()) {
+                self.preset_offer_mode = "A".to_string();
+            }
+            if !anime4k::QUALITIES.contains(&self.preset_offer_quality.as_str()) {
+                self.preset_offer_quality = "M".to_string();
+            }
+        }
+
+        let mut open = self.show_preset_offer;
+        let mut applied = false;
+        let mut disabled = false;
+        egui::Window::new(title)
+            .open(&mut open)
+            .resizable(false)
+            .min_width(380.0)
+            .show(ctx, |ui| {
+                ui.monospace(&name);
+                ui.horizontal(|ui| {
+                    ui.label(quality_label);
+                    egui::ComboBox::from_id_salt("offer-quality")
+                        .selected_text(self.preset_offer_quality.clone())
+                        .show_ui(ui, |ui| {
+                            for quality in anime4k::QUALITIES
+                                .iter()
+                                .map(|s| s.to_string())
+                                .chain(std::iter::once("HQ".to_string()))
+                            {
+                                ui.selectable_value(
+                                    &mut self.preset_offer_quality,
+                                    quality.clone(),
+                                    quality,
+                                );
+                            }
+                        });
+                    ui.label(mode_label);
+                    egui::ComboBox::from_id_salt("offer-mode")
+                        .selected_text(self.preset_offer_mode.clone())
+                        .show_ui(ui, |ui| {
+                            if is_hq {
+                                for mode in &hq_names {
+                                    ui.selectable_value(
+                                        &mut self.preset_offer_mode,
+                                        mode.clone(),
+                                        mode,
+                                    );
+                                }
+                            } else {
+                                for mode in anime4k::MODES {
+                                    ui.selectable_value(
+                                        &mut self.preset_offer_mode,
+                                        (*mode).to_string(),
+                                        *mode,
+                                    );
+                                }
+                            }
+                        });
+                });
+                ui.horizontal(|ui| {
+                    if ui.button(apply_label).clicked() {
+                        applied = true;
+                    }
+                    if ui.button(disable_label).clicked() {
+                        disabled = true;
+                    }
+                });
+                ui.checkbox(&mut self.preset_offer_dont_ask, dont_ask_label);
+            });
+        if applied {
+            if is_hq {
+                self.apply_anime4k_hq(&self.preset_offer_mode.clone());
+            } else {
+                let quality = self.preset_offer_quality.clone();
+                let mode = self.preset_offer_mode.clone();
+                self.apply_anime4k(&quality, &mode);
+            }
+            self.finish_preset_offer();
+            self.show_preset_offer = false;
+        } else if disabled {
+            self.disable_anime4k();
+            self.finish_preset_offer();
+            self.show_preset_offer = false;
+        } else {
+            self.show_preset_offer = open;
+        }
+    }
+
+    /// Persists the "don't ask again" opt-out after an explicit choice.
+    fn finish_preset_offer(&mut self) {
+        if self.preset_offer_dont_ask {
+            self.config.set("askPresetOnOpen", json!(false));
+        }
     }
 
     fn open_url_dialog(&mut self, ctx: &egui::Context) {
@@ -1933,5 +2237,23 @@ mod tests {
             "video.mp4"
         );
         assert_eq!(display_name_of("/media/a.mkv"), "a.mkv");
+    }
+
+    #[test]
+    fn preset_choice_json_roundtrip() {
+        let standard = PresetChoice::Standard {
+            quality: "M".to_string(),
+            mode: "A".to_string(),
+        };
+        assert_eq!(PresetChoice::from_json(&standard.to_json()), Some(standard));
+        let hq = PresetChoice::Hq {
+            name: "A (Death)".to_string(),
+        };
+        assert_eq!(PresetChoice::from_json(&hq.to_json()), Some(hq));
+        assert_eq!(
+            PresetChoice::from_json(&PresetChoice::Disabled.to_json()),
+            Some(PresetChoice::Disabled)
+        );
+        assert_eq!(PresetChoice::from_json(&json!({})), None);
     }
 }
