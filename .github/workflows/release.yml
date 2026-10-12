@@ -36,11 +36,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          # Official mpv builds ship libmpv-2.dll but no import lib,
-          # so generate mpv.lib from the DLL exports for the linker.
+          # Official mpv builds ship libmpv-2.dll (in the mpv-dev package)
+          # but no import lib, so generate mpv.lib from the DLL exports.
           New-Item -ItemType Directory -Force mpvlib | Out-Null
           $rel = Invoke-RestMethod 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest'
-          $asset = @($rel.assets | Where-Object { $_.name -match '^mpv-x86_64-.*\.7z$' })[0]
+          $asset = @($rel.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-\d.*\.7z$' })[0]
           if (-not $asset) { throw 'libmpv archive not found in latest mpv release' }
           Invoke-WebRequest $asset.browser_download_url -OutFile mpv.7z
           7z x mpv.7z -ompv_dist 'libmpv-2.dll' -y | Out-Null
