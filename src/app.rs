@@ -37,6 +37,10 @@ const SPEEDS: &[f64] = &[
     0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0,
 ];
 
+/// Donation card from the README (spaced for display, plain for copying).
+const DONATE_CARD_SPACED: &str = "2202 2050 1464 4675";
+const DONATE_CARD_PLAIN: &str = "2202205014644675";
+
 /// `MM:SS`, or `HH:MM:SS` for videos >= 1h (mirrors `divmod` formatting).
 fn fmt_time(secs: f64) -> String {
     let total = secs.max(0.0) as u64;
@@ -1484,6 +1488,7 @@ impl AnimePlayerApp {
         }
         let title = self.t("About");
         let about_text = self.t("About program");
+        let copy_label = self.t("Copy");
         let version = self.mpv.mpv_version();
         let mut open = self.show_about;
         egui::Window::new(title)
@@ -1505,6 +1510,19 @@ impl AnimePlayerApp {
                     });
                 });
                 ui.label(about_text);
+                ui.separator();
+                ui.horizontal(|ui| {
+                    ui.label("Telegram:");
+                    ui.hyperlink("https://t.me/avencoresyt");
+                });
+                ui.horizontal(|ui| {
+                    ui.label("💰 SBER:");
+                    ui.monospace(DONATE_CARD_SPACED);
+                    if ui.button(copy_label).clicked() {
+                        // Bank apps paste card numbers without spaces.
+                        ui.ctx().copy_text(DONATE_CARD_PLAIN.to_string());
+                    }
+                });
             });
         self.show_about = open;
     }
