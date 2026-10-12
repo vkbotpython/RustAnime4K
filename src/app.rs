@@ -198,6 +198,9 @@ impl AnimePlayerApp {
         mpv: Arc<dyn MpvBackend>,
         cli_arg: Option<String>,
     ) -> Self {
+        // Enables PNG decoding for `egui::Image::from_bytes` (About dialog).
+        // Without this, images render as a ⚠ placeholder.
+        egui_extras::install_image_loaders(&cc.egui_ctx);
         let config = ConfigManager::new("config.json");
         let lang = i18n::resolve(get_str(&config, "language").as_deref());
         let volume_plus = get_bool(&config, "volumePlus", false);
