@@ -46,14 +46,22 @@ jobs:
           7z x mpv.7z -ompv_dist 'libmpv-2.dll' -y | Out-Null
           $dll = Get-ChildItem mpv_dist -Recurse -Filter libmpv-2.dll | Select-Object -First 1
           if (-not $dll) { throw 'libmpv-2.dll not found in archive' }
-          $vs = & "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools -property installationPath
-          $tool = Get-ChildItem "$vs/VC/Tools/MSVC/*/bin/Hostx64/x64" -Directory | Sort-Object Name -Descending | Select-Object -First 1
-          $names = & "$($tool.FullName)/dumpbin.exe" /exports $dll.FullName |
+          # dumpbin/lib ship with VS BuildTools; locate them directly
+          # (vswhere output is unreliable across runner images).
+          $dumpbin = Get-ChildItem 'C:/Program Files/Microsoft Visual Studio' -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
+          if (-not $dumpbin) {
+            $dumpbin = Get-ChildItem 'C:/Program Files (x86)/Microsoft Visual Studio' -Recurse -Filter dumpbin.exe -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -match 'Hostx64\\x64' } | Select-Object -First 1
+          }
+          if (-not $dumpbin) { throw 'dumpbin.exe (VS BuildTools) not found' }
+          $tool = $dumpbin.DirectoryName
+          $names = & "$tool/dumpbin.exe" /exports $dll.FullName |
             Select-String '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)' |
             ForEach-Object { $_.Matches.Groups[1].Value }
           if (-not $names) { throw 'no exports parsed from libmpv-2.dll' }
           @('LIBRARY libmpv-2', 'EXPORTS') + $names | Out-File mpv.def -Encoding ascii
-          & "$($tool.FullName)/lib.exe" "/def:$PWD/mpv.def" '/out:mpvlib/mpv.lib' '/machine:x64'
+          & "$tool/lib.exe" "/def:$PWD/mpv.def" '/out:mpvlib/mpv.lib' '/machine:x64'
           if ($LASTEXITCODE -ne 0) { throw 'lib.exe failed' }
           # The loader finds the DLL next to the exe: pre-place it so the
           # smoke test below passes, reuse it for packaging + installer.
