@@ -61,7 +61,7 @@ jobs:
       - run: cargo test --features video
 
   build-release:
-    name: release build (${{ matrix.os }})
+    name: build + bundle libmpv (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -76,27 +76,50 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-            libxkbcommon-dev libxkbcommon-x11-dev libgl1-mesa-dev
+            libxkbcommon-dev libxkbcommon-x11-dev libgl1-mesa-dev \
+            libmpv-dev patchelf
+
+      - name: Prepare libmpv (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          # Official mpv builds ship libmpv-2.dll (in the mpv-dev package)
+          # but no import lib, so generate mpv.lib from the DLL exports.
+          New-Item -ItemType Directory -Force mpvlib | Out-Null
+          $rel = Invoke-RestMethod 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest'
+          $asset = @($rel.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-\d.*\.7z$' })[0]
+          if (-not $asset) { throw 'libmpv archive not found in latest mpv release' }
+          Invoke-WebRequest $asset.browser_download_url -OutFile mpv.7z
+          7z x mpv.7z -ompv_dist 'libmpv-2.dll' -y | Out-Null
+          $dll = Get-ChildItem mpv_dist -Recurse -Filter libmpv-2.dll | Select-Object -First 1
+          if (-not $dll) { throw 'libmpv-2.dll not found in archive' }
+          $vs = & "${env:ProgramFiles(x86)}/Microsoft Visual Studio/Installer/vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools -property installationPath
+          $tool = Get-ChildItem "$vs/VC/Tools/MSVC/*/bin/Hostx64/x64" -Directory | Sort-Object Name -Descending | Select-Object -First 1
+          $names = & "$($tool.FullName)/dumpbin.exe" /exports $dll.FullName |
+            Select-String '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)' |
+            ForEach-Object { $_.Matches.Groups[1].Value }
+          if (-not $names) { throw 'no exports parsed from libmpv-2.dll' }
+          @('LIBRARY libmpv-2', 'EXPORTS') + $names | Out-File mpv.def -Encoding ascii
+          & "$($tool.FullName)/lib.exe" "/def:$PWD/mpv.def" '/out:mpvlib/mpv.lib' '/machine:x64'
+          if ($LASTEXITCODE -ne 0) { throw 'lib.exe failed' }
+          # The loader finds the DLL next to the exe: pre-place it so the
+          # smoke test below passes, reuse it for packaging + installer.
+          New-Item -ItemType Directory -Force target/release | Out-Null
+          Copy-Item $dll.FullName target/release/libmpv-2.dll
+          "RUSTFLAGS=-L $PWD/mpvlib" | Out-File $env:GITHUB_ENV -Append -Encoding utf8
 
       - uses: dtolnay/rust-toolchain@stable
 
-      - run: cargo build --release
+      # Full build: real playback + hardware decoding (hwdec=auto-safe).
+      - run: cargo build --release --features video
 
       - name: Loader smoke test (Windows)
         if: runner.os == 'Windows'
         run: ./target/release/anime-player.exe --help
 
-      - name: Loader smoke test + ldd audit (Linux)
+      - name: Loader smoke test (Linux, system libmpv)
         if: runner.os == 'Linux'
-        run: |
-          ./target/release/anime-player --help
-          echo '--- ldd ---'
-          ldd target/release/anime-player
-          echo '--- DT_NEEDED ---'
-          readelf -d target/release/anime-player | grep NEEDED
-          if ldd target/release/anime-player | grep -q 'not found'; then
-            echo 'ERROR: missing shared libraries'; exit 1
-          fi
+        run: ./target/release/anime-player --help
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -104,6 +127,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force dist/anime-player | Out-Null
           Copy-Item target/release/anime-player.exe dist/anime-player/
+          Copy-Item target/release/libmpv-2.dll dist/anime-player/
           Copy-Item assets/shaders dist/anime-player/shaders -Recurse
           Copy-Item assets/images dist/anime-player/images -Recurse
           Copy-Item assets/docs dist/anime-player/docs -Recurse
@@ -111,13 +135,40 @@ jobs:
           Copy-Item README.md, LICENSE dist/anime-player/
           Compress-Archive -Path dist/anime-player -DestinationPath anime-player-windows-x86_64.zip
 
-      - name: Package (Linux)
+      - name: Package (Linux, bundled libmpv)
         if: runner.os == 'Linux'
         run: |
-          mkdir -p dist/anime-player
+          mkdir -p dist/anime-player/lib
           cp target/release/anime-player dist/anime-player/
           cp -r assets/shaders assets/images assets/docs dist/anime-player/
           cp assets/favicon.ico packaging/linux/*.desktop README.md LICENSE dist/anime-player/
+          # Bundle libmpv.so + its private deps (ffmpeg chain, ...).
+          # Host-provided stacks (glibc, X11/Wayland, Mesa/GL, DRM) are excluded.
+          EXCLUDE='^lib(c|m|dl|pthread|rt|resolv)\.so|ld-linux|libGL\.|libEGL\.|libGLX|libGLdispatch|libOpenGL|libX11\.|libxcb\.|libXau\.|libXdmcp\.|libxkb|libwayland|libdrm\.|libvulkan\.|libgbm\.'
+          mapfile -t QUEUE < <(ldd target/release/anime-player | grep -oP '=> \K/\S+')
+          declare -A SEEN=()
+          while [ "${#QUEUE[@]}" -gt 0 ]; do
+            LIB="${QUEUE[0]}"; QUEUE=("${QUEUE[@]:1}")
+            BASE="$(basename "$LIB")"
+            [ -n "${SEEN[$BASE]:-}" ] && continue
+            SEEN[$BASE]=1
+            echo "$BASE" | grep -Eq "$EXCLUDE" && continue
+            cp -L "$LIB" "dist/anime-player/lib/$BASE"
+            while read -r DEP; do
+              [ -n "$DEP" ] && QUEUE+=("$DEP")
+            done < <(ldd "$LIB" 2>/dev/null | grep -oP '=> \K/\S+')
+          done
+          patchelf --set-rpath '$ORIGIN/lib' --force-rpath dist/anime-player/anime-player
+          for F in dist/anime-player/lib/*.so*; do
+            patchelf --set-rpath '$ORIGIN' --force-rpath "$F" 2>/dev/null || true
+          done
+          echo '--- bundled libs ---'
+          ls dist/anime-player/lib
+          echo '--- ldd of shipped binary (must use lib/ paths, no "not found") ---'
+          ldd dist/anime-player/anime-player
+          if ldd dist/anime-player/anime-player | grep -q 'not found'; then
+            echo 'ERROR: missing shared libraries'; exit 1
+          fi
           tar -czf anime-player-linux-x86_64.tar.gz -C dist anime-player
 
       - uses: actions/upload-artifact@v7

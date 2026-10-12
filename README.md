@@ -117,9 +117,11 @@ audio-delay=0.15
 
 - `ci.yml`: `fmt --check` + `clippy -D warnings` + `cargo test` на
   Windows + Linux; плюс `cargo check/test --features video` на Linux.
-- `release.yml`: по тегу `v*` собирает релизные бинарники для Windows + Linux,
-  собирает установщик Inno Setup на Windows и публикует GitHub Release
-  с portable-архивами.
+  Джоба `build-release` собирает `--features video` с бандлингом libmpv —
+  её артефакты (`anime-player-Windows` / `anime-player-Linux`) и есть
+  рабочий плеер, качать из вкладки Actions.
+- `release.yml`: dormant, срабатывает только по тегу `v*` (сборка релизных
+  бинарников + Inno Setup + публикация GitHub Release).
 
 # 📜 Лицензия
 
