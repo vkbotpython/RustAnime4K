@@ -2544,35 +2544,43 @@ impl Anime4KPlayerApp {
             .show(ctx, |ui| {
                 ui.label(prompt);
                 ui.label("name=value");
-                ui.add(
-                    egui::TextEdit::multiline(&mut self.launch_params_text)
-                        .desired_rows(8)
-                        .desired_width(f32::INFINITY),
-                );
-                ui.horizontal(|ui| {
-                    if ui.button(save_label).clicked() {
-                        saved = true;
-                    }
-                    if ui.button(apply_label).clicked() {
-                        let mut ok = true;
-                        for (name, value) in parse_launch_params(&self.launch_params_text.clone()) {
-                            if name == "volume" {
-                                if let Ok(v) = value.parse::<i32>() {
-                                    self.player.set_volume(&*self.mpv, v);
-                                } else {
-                                    ok = false;
-                                }
-                            } else {
-                                self.mpv.set_option_str(&name, &value);
-                            }
+                // Buttons pinned to the bottom, editor fills the rest with
+                // an explicit size: a fixed-rows TextEdit lets the window
+                // snap back to content height, making vertical resize
+                // impossible. Filling the allocation keeps dragged height.
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button(save_label).clicked() {
+                            saved = true;
                         }
-                        saved = true;
-                        applied_ok = Some(ok);
-                    }
-                    if ui.button(cancel_label).clicked() {
-                        // Discard the draft on Cancel.
-                        cancelled = true;
-                    }
+                        if ui.button(apply_label).clicked() {
+                            let mut ok = true;
+                            for (name, value) in
+                                parse_launch_params(&self.launch_params_text.clone())
+                            {
+                                if name == "volume" {
+                                    if let Ok(v) = value.parse::<i32>() {
+                                        self.player.set_volume(&*self.mpv, v);
+                                    } else {
+                                        ok = false;
+                                    }
+                                } else {
+                                    self.mpv.set_option_str(&name, &value);
+                                }
+                            }
+                            saved = true;
+                            applied_ok = Some(ok);
+                        }
+                        if ui.button(cancel_label).clicked() {
+                            // Discard the draft on Cancel.
+                            cancelled = true;
+                        }
+                    });
+                    let avail = ui.available_size();
+                    ui.add_sized(
+                        egui::vec2(avail.x, avail.y.max(120.0)),
+                        egui::TextEdit::multiline(&mut self.launch_params_text),
+                    );
                 });
             });
         if cancelled {
@@ -2652,9 +2660,13 @@ impl Anime4KPlayerApp {
                     ui.ctx().copy_text(blocks.join("\n\n"));
                 }
             });
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                ui.monospace(format!("# {selected_text}\n{single}"));
-            });
+            // No auto-shrink: otherwise the window snaps back to content
+            // height on release and vertical resize is impossible.
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.monospace(format!("# {selected_text}\n{single}"));
+                });
         });
         self.show_android = open;
     }
