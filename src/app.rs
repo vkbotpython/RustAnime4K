@@ -253,6 +253,21 @@ pub struct Anime4KPlayerApp {
     /// When the SBER card number was copied from the About dialog.
     /// Shows a short "copied" confirmation next to the button.
     about_copied_at: Option<Instant>,
+
+    /// Pending screenshot-file watch, armed when a screenshot is taken.
+    /// mpv writes the file asynchronously with a name it chooses itself,
+    /// so completion is detected by a new file appearing in the folder
+    /// (see `poll_screenshot`) instead of trusting silent dispatch.
+    screenshot_pending: Option<ScreenshotWatch>,
+}
+
+/// A screenshot request waiting for its file to land on disk.
+struct ScreenshotWatch {
+    dir: PathBuf,
+    /// File names present at dispatch; the screenshot is the newcomer.
+    before: Vec<String>,
+    /// Give up (and report where to look) after this instant.
+    deadline: Instant,
 }
 
 /// Cached mpv state. During playback egui repaints on every video frame
@@ -372,6 +387,7 @@ impl Anime4KPlayerApp {
             ui_ms_ema: 0.0,
             video_ms_ema: 0.0,
             about_copied_at: None,
+            screenshot_pending: None,
         };
         app.apply_style(&cc.egui_ctx);
         app.apply_theme(&cc.egui_ctx);
@@ -1830,6 +1846,7 @@ impl Anime4KPlayerApp {
 
 impl Anime4KPlayerApp {
     fn dialogs(&mut self, ctx: &egui::Context) {
+        self.poll_screenshot();
         self.settings_dialog(ctx);
         self.about_dialog(ctx);
         self.preset_offer_dialog(ctx);
@@ -2471,6 +2488,22 @@ impl Anime4KPlayerApp {
         }
     }
 
+    /// Non-blocking completion check for an armed screenshot watch.
+    /// Called every frame: reports the landed file by name, or — past the
+    /// deadline — points at `mpv.log` instead of pretending it worked.
+    fn poll_screenshot(&mut self) {
+        let Some(watch) = self.screenshot_pending.take() else {
+            return;
+        };
+        if let Some(name) = crate::mpv::find_new_file(&watch.before, &watch.dir) {
+            self.status = format!("{}: {name}", self.t("Screenshot"));
+        } else if Instant::now() >= watch.deadline {
+            self.status = format!("{} (mpv.log)", self.t("Error"));
+        } else {
+            self.screenshot_pending = Some(watch);
+        }
+    }
+
     fn screenshot_dialog(&mut self, ctx: &egui::Context) {
         if !self.show_screenshot {
             return;
@@ -2479,6 +2512,7 @@ impl Anime4KPlayerApp {
         let prompt = self.t("Enter folder path for screenshots");
         let save = self.t("Save");
         let paste = self.t("Paste");
+        let take_shot = self.t("Take a screenshot");
         let err = self.t("Error");
         let mut open = self.show_screenshot;
         let mut done = false;
@@ -2505,17 +2539,49 @@ impl Anime4KPlayerApp {
                             self.screenshot_dir_text = text.trim().to_string();
                         }
                     }
+                    // "Save" only remembers the folder (no capture here):
+                    // the shot itself is taken by the dedicated button below.
                     if ui.button(save).clicked() {
                         let dir = self.screenshot_dir_text.trim().to_string();
-                        if !dir.is_empty() {
-                            self.mpv.set_screenshot_directory(&dir);
-                            self.mpv.screenshot();
-                            done = true;
-                        } else {
+                        if dir.is_empty() {
                             failed = true;
+                        } else if let Err(e) = self.mpv.set_screenshot_directory(&dir) {
+                            eprintln!("screenshot directory failed: {e:#}");
+                            failed = true;
+                        } else {
+                            done = true;
                         }
                     }
                 });
+                // Explicit capture: snapshot the folder contents BEFORE
+                // dispatching, otherwise the new file is already in `before`
+                // and `poll_screenshot` can never spot it.
+                if ui.button(take_shot).clicked() {
+                    let dir = self.screenshot_dir_text.trim().to_string();
+                    if dir.is_empty() {
+                        failed = true;
+                    } else {
+                        let dir_path = PathBuf::from(&dir);
+                        let before = crate::mpv::dir_file_names(&dir_path);
+                        let dispatched = self
+                            .mpv
+                            .set_screenshot_directory(&dir)
+                            .and_then(|()| self.mpv.screenshot());
+                        match dispatched {
+                            Ok(()) => {
+                                self.screenshot_pending = Some(ScreenshotWatch {
+                                    dir: dir_path,
+                                    before,
+                                    deadline: Instant::now() + Duration::from_secs(5),
+                                });
+                            }
+                            Err(e) => {
+                                eprintln!("screenshot failed: {e:#}");
+                                failed = true;
+                            }
+                        }
+                    }
+                }
             });
         if failed {
             self.status = err;

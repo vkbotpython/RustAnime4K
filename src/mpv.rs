@@ -72,8 +72,13 @@ pub trait MpvBackend: Send + Sync {
     fn video_zoom(&self) -> f64;
     fn set_video_zoom(&self, zoom: f64);
     fn set_glsl_shaders(&self, value: &str);
-    fn screenshot(&self);
-    fn set_screenshot_directory(&self, dir: &str);
+    /// Takes a screenshot into the directory set by
+    /// [`MpvBackend::set_screenshot_directory`]. Returns the dispatch error
+    /// instead of swallowing it, so the UI can report it.
+    fn screenshot(&self) -> anyhow::Result<()>;
+    /// Points mpv screenshots at `dir`, creating it first (mpv itself never
+    /// creates `screenshot-directory` and fails silently without it).
+    fn set_screenshot_directory(&self, dir: &str) -> anyhow::Result<()>;
     fn set_audio_delay(&self, delay: f64);
     fn set_svp(&self, on: bool);
     /// Applies one `name=value` launch parameter (safe subset of stored params).
@@ -132,6 +137,7 @@ struct MockState {
     pub video_zoom: f64,
     pub glsl_shaders: String,
     pub screenshots: u32,
+    pub screenshot_dir: Option<String>,
     pub eof_reached: bool,
     pub options: Vec<(String, String)>,
 }
@@ -220,15 +226,29 @@ impl MpvBackend for MockMpv {
     fn set_glsl_shaders(&self, value: &str) {
         self.state.lock().unwrap().glsl_shaders = value.to_string();
     }
-    fn screenshot(&self) {
-        self.state.lock().unwrap().screenshots += 1;
+    fn screenshot(&self) -> anyhow::Result<()> {
+        let mut s = self.state.lock().unwrap();
+        s.screenshots += 1;
+        let n = s.screenshots;
+        let dir = s.screenshot_dir.clone();
+        drop(s);
+        // Mock mirrors the real backend end to end (directory + a file the
+        // UI watch can find), so the dialog flow is testable without libmpv.
+        // A 1x1 BMP needs no encoder crates; it is only a stand-in.
+        if let Some(dir) = dir {
+            std::fs::create_dir_all(&dir)
+                .map_err(|e| anyhow::anyhow!("cannot create {dir}: {e}"))?;
+            std::fs::write(dir_file(dir, n), mock_bmp_bytes())
+                .map_err(|e| anyhow::anyhow!("cannot write mock screenshot: {e}"))?;
+        }
+        Ok(())
     }
-    fn set_screenshot_directory(&self, dir: &str) {
-        self.state
-            .lock()
-            .unwrap()
-            .options
+    fn set_screenshot_directory(&self, dir: &str) -> anyhow::Result<()> {
+        let mut s = self.state.lock().unwrap();
+        s.screenshot_dir = Some(dir.to_string());
+        s.options
             .push(("screenshot-directory".to_string(), dir.to_string()));
+        Ok(())
     }
     fn set_audio_delay(&self, delay: f64) {
         self.state
@@ -426,14 +446,22 @@ impl MpvBackend for LibMpv {
     fn set_glsl_shaders(&self, value: &str) {
         let _ = self.inner.set_property("glsl-shaders", value.to_string());
     }
-    fn screenshot(&self) {
-        let _ = self.inner.command("screenshot", &[]);
+    fn screenshot(&self) -> anyhow::Result<()> {
+        self.inner
+            .command("screenshot", &[])
+            .map_err(|e| anyhow::anyhow!("mpv screenshot failed: {e}"))?;
+        Ok(())
     }
-    fn set_screenshot_directory(&self, dir: &str) {
-        let _ = self
-            .inner
-            .set_property("screenshot-directory", dir.to_string());
+    fn set_screenshot_directory(&self, dir: &str) -> anyhow::Result<()> {
+        // mpv never creates this directory itself: a missing one makes
+        // every screenshot fail without a peep.
+        std::fs::create_dir_all(dir)
+            .map_err(|e| anyhow::anyhow!("cannot create screenshot dir {dir}: {e}"))?;
+        self.inner
+            .set_property("screenshot-directory", dir.to_string())
+            .map_err(|e| anyhow::anyhow!("mpv screenshot-directory failed: {e}"))?;
         let _ = self.inner.set_property("screenshot-jpeg-quality", 100_i64);
+        Ok(())
     }
     fn set_audio_delay(&self, delay: f64) {
         let _ = self.inner.set_property("audio-delay", delay);
@@ -560,6 +588,53 @@ impl MpvBackend for LibMpv {
     }
 }
 
+/// File names (lossy) currently inside `dir`. Read failures yield an empty
+/// list: the screenshot watch treats them as "nothing new yet".
+pub(crate) fn dir_file_names(dir: &std::path::Path) -> Vec<String> {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(|e| e.ok())
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// First file in `dir` absent from `before` (the mpv screenshot that just
+/// landed), if any.
+pub(crate) fn find_new_file(before: &[String], dir: &std::path::Path) -> Option<String> {
+    dir_file_names(dir)
+        .into_iter()
+        .find(|name| !before.iter().any(|b| b == name))
+}
+
+/// `dir` + per-shot file name for the mock backend's stand-in screenshot.
+fn dir_file(dir: String, n: u32) -> std::path::PathBuf {
+    std::path::Path::new(&dir).join(format!("mock-shot-{n}.bmp"))
+}
+
+/// Bytes of a 1x1 24-bit BMP. Hand-rolled so the mock backend needs no
+/// image-encoder crates: 14-byte file header + 40-byte info header +
+/// one padded pixel row (58 bytes total).
+fn mock_bmp_bytes() -> Vec<u8> {
+    let mut out = Vec::with_capacity(58);
+    out.extend_from_slice(b"BM");
+    out.extend_from_slice(&58u32.to_le_bytes()); // file size
+    out.extend_from_slice(&[0u8; 4]); // reserved
+    out.extend_from_slice(&54u32.to_le_bytes()); // pixel data offset
+    out.extend_from_slice(&40u32.to_le_bytes()); // info header size
+    out.extend_from_slice(&1i32.to_le_bytes()); // width
+    out.extend_from_slice(&1i32.to_le_bytes()); // height
+    out.extend_from_slice(&1u16.to_le_bytes()); // planes
+    out.extend_from_slice(&24u16.to_le_bytes()); // bits per pixel
+    out.extend_from_slice(&0u32.to_le_bytes()); // compression (none)
+    out.extend_from_slice(&4u32.to_le_bytes()); // image size
+    out.extend_from_slice(&[0u8; 16]); // resolution + palette fields
+    out.extend_from_slice(&[0x20, 0x20, 0x20, 0x00]); // one gray pixel + pad
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -612,7 +687,7 @@ mod tests {
         mpv.set_glsl_shaders("a.glsl:b.glsl");
         assert_eq!(mpv.glsl_shaders(), "a.glsl:b.glsl");
         mpv.set_svp(true);
-        mpv.screenshot();
+        mpv.screenshot().unwrap();
     }
 
     #[test]
@@ -621,5 +696,45 @@ mod tests {
         assert!(!mpv.eof_reached());
         mpv.set_eof(true);
         assert!(mpv.eof_reached());
+    }
+
+    #[test]
+    fn mock_screenshot_writes_findable_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let dir_str = dir.path().to_string_lossy().into_owned();
+        let mpv = MockMpv::new();
+        // Screenshot without a directory: counted, no file, still Ok.
+        mpv.screenshot().unwrap();
+        assert!(dir_file_names(dir.path()).is_empty());
+        // With a directory: one new BMP per shot, discoverable by the watch.
+        mpv.set_screenshot_directory(&dir_str).unwrap();
+        let before = dir_file_names(dir.path());
+        mpv.screenshot().unwrap();
+        let found = find_new_file(&before, dir.path()).expect("new shot file");
+        assert!(found.starts_with("mock-shot-") && found.ends_with(".bmp"));
+        let bytes = std::fs::read(dir.path().join(&found)).unwrap();
+        assert_eq!(&bytes[0..2], b"BM");
+        assert_eq!(bytes.len(), 58);
+        assert_eq!(i32::from_le_bytes(bytes[18..22].try_into().unwrap()), 1);
+        assert_eq!(i32::from_le_bytes(bytes[22..26].try_into().unwrap()), 1);
+        // Second shot: a different file, the first one is "old" now.
+        let before = dir_file_names(dir.path());
+        mpv.screenshot().unwrap();
+        let found2 = find_new_file(&before, dir.path()).expect("second shot file");
+        assert_ne!(found, found2);
+        assert!(find_new_file(&dir_file_names(dir.path()), dir.path()).is_none());
+    }
+
+    #[test]
+    fn screenshot_creates_missing_directory() {
+        let dir = tempfile::tempdir().unwrap();
+        let nested = dir.path().join("a").join("b");
+        assert!(!nested.exists());
+        let mpv = MockMpv::new();
+        mpv.set_screenshot_directory(&nested.to_string_lossy())
+            .unwrap();
+        mpv.screenshot().unwrap();
+        assert!(nested.is_dir());
+        assert_eq!(dir_file_names(&nested).len(), 1);
     }
 }
