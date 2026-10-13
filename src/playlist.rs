@@ -1,8 +1,8 @@
-//! Playlist helpers (port of `Player.list_files / list_filenames`).
+//! Playlist helpers.
 
 use crate::formats::is_media_file;
 
-/// Full paths of playable files in `folder` (non-recursive, like `os.listdir`).
+/// Full paths of playable files in `folder` (non-recursive).
 pub fn list_files(folder: &std::path::Path) -> Vec<std::path::PathBuf> {
     let Ok(entries) = std::fs::read_dir(folder) else {
         return Vec::new();
@@ -21,7 +21,7 @@ pub fn list_files(folder: &std::path::Path) -> Vec<std::path::PathBuf> {
     files
 }
 
-/// Numbered display names (`"1) name.mkv"`), mirrors `list_filenames`.
+/// Numbered display names (`"1) name.mkv"`).
 pub fn list_filenames(files: &[std::path::PathBuf]) -> Vec<String> {
     files
         .iter()

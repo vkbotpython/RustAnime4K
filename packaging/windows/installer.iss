@@ -1,13 +1,13 @@
-; Anime Player — Inno Setup installer for the Rust build.
+; Anime4K Player — Inno Setup installer.
 ; Build from repo root: cargo build --release, then run ISCC on this file.
 ; For --features video builds, place mpv.lib/mpv.dll next to the exe
 ; (Linux CI uses libmpv-dev; see README).
 
-#define MyAppName "Anime Player"
+#define MyAppName "Anime4K Player"
 #define MyAppVersion "1.0.0"
 #define MyAppPublisher "avencores"
-#define MyAppURL "https://github.com/Communist02/AnimePlayer"
-#define MyAppExeName "anime-player.exe"
+#define MyAppURL "https://github.com/vkbotpython/RustAnime4K"
+#define MyAppExeName "anime4k-player.exe"
 #define MyAppAssocName MyAppName + " File"
 
 #define SrcDir "..\.."
@@ -58,7 +58,7 @@
 #define wmvAssocKey StringChange(MyAppAssocName, " ", "") + wmvAssocExt
 
 [Setup]
-AppId=AnimePlayer
+AppId=Anime4KPlayer
 AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppPublisher={#MyAppPublisher}
@@ -70,7 +70,7 @@ ChangesAssociations=yes
 DisableProgramGroupPage=yes
 PrivilegesRequiredOverridesAllowed=dialog
 OutputDir=Output
-OutputBaseFilename=anime_player_x64_setup
+OutputBaseFilename=anime4k_player_x64_setup
 SetupIconFile={#SrcDir}\assets\favicon.ico
 SolidCompression=yes
 WizardStyle=modern

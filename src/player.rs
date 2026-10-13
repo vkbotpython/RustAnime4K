@@ -1,4 +1,4 @@
-//! Playback state machine (port of `main.py: class Player`).
+//! Playback state machine.
 //!
 //! UI-independent: owns the file list, current index, volume rules and the
 //! Anime4K preset name. Talks to mpv through [`crate::mpv::MpvBackend`] so it
@@ -11,7 +11,7 @@ use crate::playlist::{list_filenames, list_files};
 
 pub const MAX_VOLUME: i32 = 100;
 pub const MAX_VOLUME_PLUS: i32 = 150;
-/// Positions below this are not restored on startup (mirrors `save_parameters`).
+/// Positions below this are not restored on startup.
 pub const MIN_RESTORE_POSITION: f64 = 10.0;
 
 #[derive(Debug, Default)]
@@ -58,14 +58,14 @@ impl PlayerState {
         self.current = Some(0);
     }
 
-    /// Mirrors `Player.open_file`.
+    /// Opens a single file for playback.
     pub fn open_file(&mut self, mpv: &dyn MpvBackend, file: &Path) {
         mpv.stop();
         self.set_single(file.to_path_buf());
         mpv.play(&file.to_string_lossy());
     }
 
-    /// Mirrors `Player.open_url`.
+    /// Opens a URL for playback.
     pub fn open_url(&mut self, mpv: &dyn MpvBackend, url: &str) {
         let url = url.trim().to_string();
         mpv.stop();
@@ -74,7 +74,7 @@ impl PlayerState {
         mpv.play(&url);
     }
 
-    /// Mirrors `Player.open_folder`: scans the folder, selects `file` if given.
+    /// Scans the folder, selects `file` if given.
     pub fn open_folder(&mut self, mpv: &dyn MpvBackend, folder: &Path, file: Option<&Path>) {
         mpv.stop();
         self.files = list_files(folder);
@@ -89,7 +89,7 @@ impl PlayerState {
         mpv.play(&self.files[index].to_string_lossy());
     }
 
-    /// Mirrors `Player.add_file` (drag&drop of extra files).
+    /// Adds a file to the playlist (drag&drop of extra files).
     pub fn add_file(&mut self, file: PathBuf) {
         self.files.push(file);
         if self.current.is_none() {
@@ -97,7 +97,7 @@ impl PlayerState {
         }
     }
 
-    /// Mirrors `Player.next`.
+    /// Advances to the next file.
     pub fn next(&mut self, mpv: &dyn MpvBackend) -> bool {
         let next = match self.current {
             Some(i) if i + 1 < self.files.len() => i + 1,
@@ -108,7 +108,7 @@ impl PlayerState {
         true
     }
 
-    /// Mirrors `Player.prev`.
+    /// Returns to the previous file.
     pub fn prev(&mut self, mpv: &dyn MpvBackend) -> bool {
         let prev = match self.current {
             Some(i) if i > 0 => i - 1,
@@ -123,7 +123,7 @@ impl PlayerState {
         true
     }
 
-    /// Mirrors `Player.update_filelist` (click on a playlist row).
+    /// Plays the file at `index` (click on a playlist row).
     pub fn play_index(&mut self, mpv: &dyn MpvBackend, index: usize) -> bool {
         if index >= self.files.len() {
             return false;
@@ -133,7 +133,7 @@ impl PlayerState {
         true
     }
 
-    /// Mirrors `Player.close`.
+    /// Closes the current file and clears the playlist.
     pub fn close(&mut self, mpv: &dyn MpvBackend) {
         mpv.stop();
         self.files.clear();
@@ -147,7 +147,7 @@ impl PlayerState {
     }
 
     pub fn volume_up(&mut self, mpv: &dyn MpvBackend) {
-        // Mirrors MainWindow.volume_plus: step 5 with snap to the max.
+        // Step 5 with snap to the max.
         let max = self.max_volume_self();
         let next = if self.volume > max - 5 {
             max
@@ -158,18 +158,18 @@ impl PlayerState {
     }
 
     pub fn volume_down(&mut self, mpv: &dyn MpvBackend) {
-        // Mirrors MainWindow.volume_minus: step 5, snap to 0.
+        // Step 5, snap to 0.
         let next = if self.volume < 5 { 0 } else { self.volume - 5 };
         self.set_volume(mpv, next);
     }
 
-    /// Mirrors `Player.disable_anime4k`.
+    /// Disables Anime4K upscaling.
     pub fn disable_anime4k(&mut self, mpv: &dyn MpvBackend) {
         self.preset_name.clear();
         mpv.set_glsl_shaders("");
     }
 
-    /// Mirrors `Player.set_preset_quality`.
+    /// Applies an Anime4K preset.
     pub fn apply_preset(&mut self, mpv: &dyn MpvBackend, name: &str, glsl_shaders: &str) {
         self.preset_name = name.to_string();
         mpv.set_glsl_shaders(glsl_shaders);
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn volume_step_snaps_to_max() {
-        // Mirrors MainWindow.volume_plus/volume_minus (±5, snap to max/0).
+        // Volume step snaps to max/0 (±5).
         let mpv = MockMpv::new();
         let mut p = PlayerState::new(96, false);
         p.volume_up(&mpv);

@@ -1,8 +1,8 @@
-//! Anime4K shader presets (port of `anime4k.py`).
+//! Anime4K shader presets.
 //!
 //! Shader file names are resolved against `assets/shaders/` at runtime;
 //! `preset_paths()` joins them with the OS-specific list separator
-//! (`;` on Windows, `:` elsewhere), mirroring `anime4k.to_string()`.
+//! (`;` on Windows, `:` elsewhere).
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -26,9 +26,8 @@ fn std(preset: &[&str]) -> Vec<String> {
     preset.iter().map(|s| s.to_string()).collect()
 }
 
-/// The 9 standard HQ presets, mirrors `standard_presets`.
-/// (Kept for parity with `anime4k.py`; the presets menu builds these
-/// dynamically via [`create_preset`], same as the Python UI does.)
+/// The 9 standard HQ presets.
+/// (The presets menu builds these dynamically via [`create_preset`].)
 #[allow(dead_code)]
 pub fn standard_presets() -> HashMap<&'static str, Vec<String>> {
     HashMap::from([
@@ -134,7 +133,7 @@ pub fn standard_presets() -> HashMap<&'static str, Vec<String>> {
     ])
 }
 
-/// The 8 ultra-HQ presets, mirrors `ultra_hq_presets`.
+/// The 8 ultra-HQ presets.
 pub fn ultra_hq_presets() -> HashMap<&'static str, Vec<String>> {
     HashMap::from([
         (
@@ -229,7 +228,7 @@ pub fn ultra_hq_presets() -> HashMap<&'static str, Vec<String>> {
     ])
 }
 
-/// Builds a preset for a quality/mode pair, mirrors `create_preset()`.
+/// Builds a preset for a quality/mode pair.
 pub fn create_preset(quality: &str, mode: &str) -> anyhow::Result<Vec<String>> {
     let sec =
         secondary_quality(quality).ok_or_else(|| anyhow::anyhow!("unknown quality: {quality}"))?;
@@ -288,8 +287,7 @@ pub fn create_preset(quality: &str, mode: &str) -> anyhow::Result<Vec<String>> {
     Ok(preset)
 }
 
-/// Joins a preset into the `glsl-shaders` mpv option value,
-/// mirrors `anime4k.to_string()`.
+/// Joins a preset into the `glsl-shaders` mpv option value.
 pub fn preset_to_glsl_shaders(shaders_dir: &Path, preset: &[String]) -> String {
     let sep = if cfg!(windows) { ";" } else { ":" };
     preset
@@ -299,7 +297,7 @@ pub fn preset_to_glsl_shaders(shaders_dir: &Path, preset: &[String]) -> String {
         .join(sep)
 }
 
-/// Builds an mpv `glsl-shaders=` config line for Android, mirrors `android_config()`.
+/// Builds an mpv `glsl-shaders=` config line for Android.
 pub fn android_config_line(preset: &[String], path: &str) -> String {
     let base = path.strip_suffix('/').unwrap_or(path);
     let joined = preset

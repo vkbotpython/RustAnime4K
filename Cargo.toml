@@ -1,13 +1,13 @@
 [package]
-name = "anime-player"
+name = "anime4k-player"
 version = "1.0.0"
-edition = "2021"
+edition = "2024"
 authors = ["avencores"]
-description = "Video player with Anime4K image upscaling (Rust port of AnimePlayer)"
+description = "Video player with Anime4K image upscaling"
 license = "GPL-3.0-or-later"
 
 [[bin]]
-name = "anime-player"
+name = "anime4k-player"
 path = "src/main.rs"
 
 [features]

@@ -1,4 +1,4 @@
-//! Supported media file extensions (port of `main.py` format tuples).
+//! Supported media file extensions.
 
 pub const VIDEO_FORMATS: &[&str] = &[
     "mp4", "mkv", "webm", "avi", "mov", "wmv", "3gp", "ts", "mpeg", "gif",

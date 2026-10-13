@@ -11,10 +11,10 @@ fn main() {
     }
     let mut res = winres::WindowsResource::new();
     res.set_icon("assets/favicon.ico");
-    res.set("ProductName", "Anime Player");
+    res.set("ProductName", "Anime4K Player");
     res.set(
         "FileDescription",
-        "Anime Player — video player with Anime4K upscaling",
+        "Anime4K Player — video player with Anime4K upscaling",
     );
     res.set("CompanyName", "avencores");
     if let Err(err) = res.compile() {

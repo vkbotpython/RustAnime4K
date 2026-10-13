@@ -1,11 +1,11 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-  Локальная сборка Anime Player (Windows): проверки + release + dist-пакет.
+  Локальная сборка Anime4K Player (Windows): проверки + release + dist-пакет.
 .DESCRIPTION
   Повторяет шаги CI (ci.yml / release.yml) локально:
   fmt + clippy + test, затем cargo build --release [--features video],
-  smoke-тест (--help) и сборка папки dist/anime-player (exe + libmpv-2.dll
+  smoke-тест (--help) и сборка папки dist/anime4k-player (exe + libmpv-2.dll
   + shaders/images/docs + favicon + README + LICENSE).
   Для линковки фичи video используется готовый mpvlib-local/mpv.lib:
     $env:RUSTFLAGS="-L<repo>/mpvlib-local"
@@ -49,7 +49,7 @@ function Find-MpvDll([string]$hint) {
   # DLL от прошлой debug-сборки (тот же файл, годится и для release).
   $candidates += (Join-Path $RepoRoot 'target\debug\libmpv-2.dll')
   # Прошлая сборка/пакет (например, скачанный из CI Actions).
-  $candidates += (Join-Path $RepoRoot 'dist\anime-player\libmpv-2.dll')
+  $candidates += (Join-Path $RepoRoot 'dist\anime4k-player\libmpv-2.dll')
   # Установленный mpv-плеер и прочие каталоги из PATH.
   foreach ($dir in ($env:PATH -split ';')) {
     if (($dir -ne $null) -and ($dir -ne "")) {
@@ -166,7 +166,7 @@ if ($Video) {
   cargo build --release
 }
 
-$Exe = Join-Path $RepoRoot 'target\release\anime-player.exe'
+$Exe = Join-Path $RepoRoot 'target\release\anime4k-player.exe'
 if (-not (Test-Path $Exe)) { throw "Сборка не дала $Exe" }
 
 # DLL рядом с exe, чтобы прошёл smoke-тест и запуск (как в release.yml).
@@ -189,14 +189,14 @@ if ($Video) {
 }
 
 # --- 3. Smoke-тест -----------------------------------------------------------
-Step 'smoke-test: anime-player --help'
+Step 'smoke-test: anime4k-player --help'
 & $Exe --help | Out-Null
 if ($LASTEXITCODE -ne 0) { throw 'smoke-test провален (не грузится libmpv-2.dll?)' }
 
 # --- 4. Dist-пакет (раскладка 1:1 с release.yml) ------------------------------
 if (-not $NoPackage) {
-  Step 'Сборка dist/anime-player'
-  $Dist = Join-Path $RepoRoot 'dist\anime-player'
+  Step 'Сборка dist/anime4k-player'
+  $Dist = Join-Path $RepoRoot 'dist\anime4k-player'
   if (Test-Path (Join-Path $RepoRoot 'dist')) {
     Remove-Item (Join-Path $RepoRoot 'dist') -Recurse -Force
   }
@@ -212,7 +212,7 @@ if (-not $NoPackage) {
   Copy-Item (Join-Path $RepoRoot 'README.md'), (Join-Path $RepoRoot 'LICENSE') $Dist/
   Write-Host "Готово: $Dist"
   if ($Zip) {
-    $ZipPath = Join-Path $RepoRoot 'anime-player-windows-x86_64.zip'
+    $ZipPath = Join-Path $RepoRoot 'anime4k-player-windows-x86_64.zip'
     if (Test-Path $ZipPath) { Remove-Item $ZipPath -Force }
     Compress-Archive -Path $Dist -DestinationPath $ZipPath
     Write-Host "Архив: $ZipPath"

@@ -16,9 +16,9 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            archive: anime-player-windows-x86_64.zip
+            archive: anime4k-player-windows-x86_64.zip
           - os: ubuntu-22.04
-            archive: anime-player-linux-x86_64.tar.gz
+            archive: anime4k-player-linux-x86_64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -76,25 +76,25 @@ jobs:
 
       - name: Loader smoke test (Windows)
         if: runner.os == 'Windows'
-        run: ./target/release/anime-player.exe --help
+        run: ./target/release/anime4k-player.exe --help
 
       - name: Loader smoke test (Linux, system libmpv)
         if: runner.os == 'Linux'
-        run: ./target/release/anime-player --help
+        run: ./target/release/anime4k-player --help
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist/anime-player | Out-Null
-          Copy-Item target/release/anime-player.exe dist/anime-player/
-          Copy-Item target/release/libmpv-2.dll dist/anime-player/
-          Copy-Item assets/shaders dist/anime-player/shaders -Recurse
-          Copy-Item assets/images dist/anime-player/images -Recurse
-          Copy-Item assets/docs dist/anime-player/docs -Recurse
-          Copy-Item assets/favicon.ico dist/anime-player/
-          Copy-Item README.md, LICENSE dist/anime-player/
-          Compress-Archive -Path dist/anime-player -DestinationPath ${{ matrix.archive }}
+          New-Item -ItemType Directory -Force dist/anime4k-player | Out-Null
+          Copy-Item target/release/anime4k-player.exe dist/anime4k-player/
+          Copy-Item target/release/libmpv-2.dll dist/anime4k-player/
+          Copy-Item assets/shaders dist/anime4k-player/shaders -Recurse
+          Copy-Item assets/images dist/anime4k-player/images -Recurse
+          Copy-Item assets/docs dist/anime4k-player/docs -Recurse
+          Copy-Item assets/favicon.ico dist/anime4k-player/
+          Copy-Item README.md, LICENSE dist/anime4k-player/
+          Compress-Archive -Path dist/anime4k-player -DestinationPath ${{ matrix.archive }}
 
       - name: Inno Setup installer (Windows)
         if: runner.os == 'Windows'
@@ -107,14 +107,14 @@ jobs:
       - name: Package (Linux, bundled libmpv)
         if: runner.os == 'Linux'
         run: |
-          mkdir -p dist/anime-player/lib
-          cp target/release/anime-player dist/anime-player/
-          cp -r assets/shaders assets/images assets/docs dist/anime-player/
-          cp assets/favicon.ico packaging/linux/*.desktop README.md LICENSE dist/anime-player/
+          mkdir -p dist/anime4k-player/lib
+          cp target/release/anime4k-player dist/anime4k-player/
+          cp -r assets/shaders assets/images assets/docs dist/anime4k-player/
+          cp assets/favicon.ico packaging/linux/*.desktop README.md LICENSE dist/anime4k-player/
           # Bundle libmpv.so + its private deps (ffmpeg chain, ...).
           # Host-provided stacks (glibc, X11/Wayland, Mesa/GL, DRM) are excluded.
           EXCLUDE='^lib(c|m|dl|pthread|rt|resolv)\.so|ld-linux|libGL\.|libEGL\.|libGLX|libGLdispatch|libOpenGL|libX11\.|libxcb\.|libXau\.|libXdmcp\.|libxkb|libwayland|libdrm\.|libvulkan\.|libgbm\.'
-          mapfile -t QUEUE < <(ldd target/release/anime-player | grep -oP '=> \K/\S+')
+          mapfile -t QUEUE < <(ldd target/release/anime4k-player | grep -oP '=> \K/\S+')
           declare -A SEEN=()
           while [ "${#QUEUE[@]}" -gt 0 ]; do
             LIB="${QUEUE[0]}"; QUEUE=("${QUEUE[@]:1}")
@@ -122,23 +122,23 @@ jobs:
             [ -n "${SEEN[$BASE]:-}" ] && continue
             SEEN[$BASE]=1
             echo "$BASE" | grep -Eq "$EXCLUDE" && continue
-            cp -L "$LIB" "dist/anime-player/lib/$BASE"
+            cp -L "$LIB" "dist/anime4k-player/lib/$BASE"
             while read -r DEP; do
               [ -n "$DEP" ] && QUEUE+=("$DEP")
             done < <(ldd "$LIB" 2>/dev/null | grep -oP '=> \K/\S+')
           done
-          patchelf --set-rpath '$ORIGIN/lib' --force-rpath dist/anime-player/anime-player
-          for F in dist/anime-player/lib/*.so*; do
+          patchelf --set-rpath '$ORIGIN/lib' --force-rpath dist/anime4k-player/anime4k-player
+          for F in dist/anime4k-player/lib/*.so*; do
             patchelf --set-rpath '$ORIGIN' --force-rpath "$F" 2>/dev/null || true
           done
           echo '--- bundled libs ---'
-          ls dist/anime-player/lib
+          ls dist/anime4k-player/lib
           echo '--- ldd of shipped binary (must use lib/ paths, no "not found") ---'
-          ldd dist/anime-player/anime-player
-          if ldd dist/anime-player/anime-player | grep -q 'not found'; then
+          ldd dist/anime4k-player/anime4k-player
+          if ldd dist/anime4k-player/anime4k-player | grep -q 'not found'; then
             echo 'ERROR: missing shared libraries'; exit 1
           fi
-          tar -czf ${{ matrix.archive }} -C dist anime-player
+          tar -czf ${{ matrix.archive }} -C dist anime4k-player
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v7

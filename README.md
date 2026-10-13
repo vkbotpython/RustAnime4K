@@ -13,20 +13,16 @@
     </a>
 </div>
 
-# 🎬 Anime Player (Rust)
+# 🎬 Anime4K Player
 
-Автор Rust-порта: **avencores**.
+Автор: **avencores**.
 
 Видеоплеер с улучшением качества рисованного изображения с помощью
 высокопроизводительного алгоритма
-[Anime4K](https://github.com/bloc97/Anime4K) — полный порт на Rust проекта
-[Communist02/AnimePlayer](https://github.com/Communist02/AnimePlayer)
-(Python + PySide6 + python-mpv, автор оригинала Denis Mazur).
+[Anime4K](https://github.com/bloc97/Anime4K), написанный на Rust
+(egui + libmpv).
 
-Устаревшее Python-дерево (`AnimePlayer/`, исключено из git) оставлено только
-как поведенческий референс и будет удалено, когда порт достигнет паритета.
-
-## ✨ Возможности (паритет с 2.3.3 + сверх того)
+## ✨ Возможности
 
 - Открытие файла / URL / папки, плейлист, drag & drop (субтитры подхватываются сами,
   symlink открывается как URL), заголовок окна = имя файла
@@ -43,7 +39,7 @@
 - Мышь: клик по видео — играть/пауза, дабл-клик — fullscreen, правый клик —
   контекстное меню. В fullscreen панели и курсор автоматически прячутся
   (если не включена фиксированная панель)
-- Горячие клавиши — полный набор из оригинала (см. таблицу ниже)
+- Горячие клавиши (см. таблицу ниже)
 - Режим SVP (`mpvpipe` + `auto-copy`), задержка звука −100…+100 с, скриншоты
 - Аппаратное декодирование (`hwdec=auto-safe` с откатом на софт) — в релизных
   сборках libmpv уже включён: на Linux лежит в `lib/` рядом с бинарником,
@@ -55,7 +51,7 @@
   пресет файла), параметры запуска, «О программе» с иконкой, Telegram и донатом
 - Windows: без консольного окна, иконка вшита в exe (`build.rs` + winres)
   и в заголовок окна
-- CLI: `anime-player <файл|папка|url>` (без восстановления сессии, как в оригинале)
+- CLI: `anime4k-player <файл|папка|url>` (без восстановления сессии)
 
 ## ⌨️ Горячие клавиши
 
@@ -78,21 +74,21 @@
 
 ```text
 src/
-  main.rs      CLI + запуск eframe, иконка окна  <- main.py (__main__)
-  app.rs       главное окно + 9 диалогов         <- MainWindow + классы *Window
+  main.rs      CLI + запуск eframe, иконка окна
+  app.rs       главное окно + 9 диалогов
                (настройки, о программе, URL, папка, скриншот,
                 параметры запуска, Android, справка + выбор пресета)
-  player.rs    логика плейлиста/громкости        <- class Player
-  mpv.rs       трейт MpvBackend + MockMpv        <- mpv.py (ctypes)
+  player.rs    логика плейлиста/громкости
+  mpv.rs       трейт MpvBackend + MockMpv
                + LibMpv + track-list (--features video)
-  video.rs     OpenGL render ctx libmpv          <- class Video(QOpenGLWidget)
+  video.rs     OpenGL render ctx libmpv
                → поверхность egui (--features video)
-  config.rs    JSON-конфиг                       <- config.py
-  anime4k.rs   пресеты шейдеров                  <- anime4k.py
-  i18n.rs      локализация                       <- localization.py
-  formats.rs   расширения медиафайлов            <- кортежи форматов в main.py
-  playlist.rs  сканирование папок                <- list_files/list_filenames
-  theme.rs     палитры + тема + стили egui       <- palettes.py
+  config.rs    JSON-конфиг
+  anime4k.rs   пресеты шейдеров
+  i18n.rs      локализация
+  formats.rs   расширения медиафайлов
+  playlist.rs  сканирование папок
+  theme.rs     палитры + тема + стили egui
 build.rs       иконка exe через winres (только Windows)
 build.ps1      локальная сборка Windows (проверки + release + dist)
 build.sh       локальная сборка Linux (проверки + release + dist)
@@ -148,7 +144,7 @@ packaging/     windows/installer.iss + linux/.desktop
 Windows, фича `video`: для линковки используется `mpvlib-local/mpv.lib`
 (`RUSTFLAGS=-Lmpvlib-local` скрипт выставляет сам), а `libmpv-2.dll` ищется
 в `./libmpv-2.dll`, `./mpvlib-local/`, `./target/release/` или указывается
-через `-MpvDll <путь>`. Готовый пакет лежит в `dist/anime-player/` — его
+через `-MpvDll <путь>`. Готовый пакет лежит в `dist/anime4k-player/` — его
 можно запускать прямо оттуда.
 
 ```powershell
@@ -203,7 +199,7 @@ cargo run --features video
 
 ### ⚙️ Безопасные параметры запуска
 
-Старое окно с `exec(...)` убрано сознательно. Сохранённые параметры используют
+Сохранённые параметры используют
 безопасное подмножество `имя=значение` (по одному на строку, комментарии `#`),
 применяются через `mpv.set_property`. Пример:
 
@@ -218,7 +214,7 @@ audio-delay=0.15
 - `ci.yml`: `fmt --check` + `clippy -D warnings` + `cargo test` на
   Windows + Linux; плюс `cargo check/test --features video` на Linux.
   Джоба `build-release` собирает `--features video` с бандлингом libmpv —
-  её артефакты (`anime-player-Windows` / `anime-player-Linux`) и есть
+  её артефакты (`anime4k-player-Windows` / `anime4k-player-Linux`) и есть
   рабочий плеер, качать из вкладки Actions.
 - `release.yml`: dormant, срабатывает только по тегу `v*` (сборка релизных
   бинарников + Inno Setup + публикация GitHub Release).

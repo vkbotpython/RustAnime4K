@@ -1,4 +1,4 @@
-//! Anime Player — Rust port: video player with Anime4K upscaling.
+//! Anime4K Player — video player with Anime4K upscaling.
 
 // Hide the console window on Windows (GUI app; mpv logs don't need a terminal).
 #![cfg_attr(target_os = "windows", windows_subsystem = "windows")]
@@ -20,11 +20,11 @@ use std::sync::Arc;
 
 use clap::Parser;
 
-use app::{AnimePlayerApp, APP_NAME};
+use app::{APP_NAME, Anime4KPlayerApp};
 use mpv::MpvBackend;
 
 #[derive(Parser, Debug)]
-#[command(name = "anime-player", about = "Video player with Anime4K upscaling")]
+#[command(name = "anime4k-player", about = "Video player with Anime4K upscaling")]
 struct Cli {
     /// Media file, folder or URL to open (skips restoring the last session).
     input: Option<String>,
@@ -45,7 +45,7 @@ fn create_backend() -> Arc<dyn MpvBackend> {
 /// the `assets/` folder next to the exe. Falls back to the default icon
 /// if the PNG ever fails to decode.
 fn load_app_icon() -> Arc<egui::IconData> {
-    eframe::icon_data::from_png_bytes(include_bytes!("../assets/images/anime-player-icon.png"))
+    eframe::icon_data::from_png_bytes(include_bytes!("../assets/images/anime4k-player-icon.png"))
         .map(Arc::new)
         .unwrap_or_else(|err| {
             eprintln!("cannot decode app icon: {err:#}");
@@ -71,7 +71,7 @@ fn main() -> eframe::Result<()> {
         APP_NAME,
         options,
         Box::new(|cc| {
-            Ok(Box::new(AnimePlayerApp::new(
+            Ok(Box::new(Anime4KPlayerApp::new(
                 cc,
                 backend.clone(),
                 cli.input,

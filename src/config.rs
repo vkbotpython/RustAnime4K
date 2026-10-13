@@ -1,8 +1,8 @@
-//! JSON config manager (port of `config.py: ConfigManager`).
+//! JSON config manager.
 //!
-//! Location mirrors the Python version:
-//! `%APPDATA%/Anime Player/config.json` on Windows,
-//! `~/.config/Anime Player/config.json` elsewhere.
+//! Location:
+//! `%APPDATA%/Anime4K Player/config.json` on Windows,
+//! `~/.config/Anime4K Player/config.json` elsewhere.
 
 use anyhow::{Context, Result};
 use serde_json::Value;
@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
 
-pub const APP_DIR_NAME: &str = "Anime Player";
+pub const APP_DIR_NAME: &str = "Anime4K Player";
 
 pub fn config_dir() -> PathBuf {
     #[cfg(windows)]
@@ -80,7 +80,7 @@ impl ConfigManager {
         self.values.insert(key.to_string(), value);
     }
 
-    /// Mirrors `ConfigManager.delete` (used when stored state is corrupt).
+    /// Removes a stored key (used when stored state is corrupt).
     #[allow(dead_code)]
     pub fn delete(&mut self, key: &str) {
         self.values.remove(key);
@@ -93,7 +93,7 @@ mod tests {
     use serde_json::json;
 
     fn tmp_path(name: &str) -> PathBuf {
-        std::env::temp_dir().join(format!("anime-player-test-{}-{name}", std::process::id()))
+        std::env::temp_dir().join(format!("anime4k-player-test-{}-{name}", std::process::id()))
     }
 
     #[test]

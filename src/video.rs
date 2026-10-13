@@ -1,9 +1,7 @@
 //! GPU video surface (`video` feature).
 //!
 //! Renders libmpv frames into an OpenGL framebuffer and blits it onto the egui
-//! surface through an `egui_glow` paint callback. This is the direct
-//! equivalent of the old `Video(QOpenGLWidget)` + `MpvRenderContext` class
-//! from `main.py` (which the Python build used on Linux).
+//! surface through an `egui_glow` paint callback.
 //!
 //! The integration pattern (render-context lifetime handling, FBO management,
 //! blit callback) follows the battle-tested `egui-sharkplayer` crate, but the

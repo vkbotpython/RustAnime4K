@@ -1,7 +1,7 @@
-//! Localization (port of `localization.py`).
+//! Localization.
 //!
-//! Strings live in `assets/i18n/<lang>.json` (exported 1:1 from the Python
-//! dicts) and are embedded at compile time. Missing keys fall back to English.
+//! Strings live in `assets/i18n/<lang>.json` and are embedded at compile
+//! time. Missing keys fall back to English.
 
 use std::collections::HashMap;
 use std::sync::OnceLock;
@@ -69,7 +69,7 @@ fn tables() -> &'static HashMap<&'static str, HashMap<String, String>> {
     })
 }
 
-/// Detects the system language the same way `localization.set_locale` does.
+/// Detects the system language.
 pub fn detect_system_lang() -> Lang {
     let locale = sys_locale::get_locale().unwrap_or_else(|| "en".to_string());
     let short = locale.split(['_', '-', '.']).next().unwrap_or("en");

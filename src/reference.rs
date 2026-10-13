@@ -27,9 +27,7 @@ fn para(ui: &mut egui::Ui, text: &str) {
 
 fn bullets(ui: &mut egui::Ui, items: &[&str]) {
     for item in items {
-        ui.add(
-            egui::Label::new(RichText::new(format!("• {item}")).size(13.0)).wrap(),
-        );
+        ui.add(egui::Label::new(RichText::new(format!("• {item}")).size(13.0)).wrap());
     }
     ui.add_space(4.0);
 }
@@ -59,7 +57,10 @@ fn card(ui: &mut egui::Ui, fill: Color32, add: impl FnOnce(&mut egui::Ui)) {
         .fill(fill)
         .inner_margin(10.0)
         .corner_radius(8.0)
-        .stroke(Stroke::new(1.0, ui.visuals().widgets.noninteractive.bg_stroke.color))
+        .stroke(Stroke::new(
+            1.0,
+            ui.visuals().widgets.noninteractive.bg_stroke.color,
+        ))
         .show(ui, add);
     ui.add_space(6.0);
 }
@@ -324,12 +325,24 @@ pub fn show(ui: &mut egui::Ui, russian: bool) {
         .num_columns(3)
         .spacing([12.0, 4.0])
         .show(ui, |ui| {
-            ui.label(RichText::new(if russian { "Основной" } else { "Primary" }).strong().size(12.5));
+            ui.label(
+                RichText::new(if russian {
+                    "Основной"
+                } else {
+                    "Primary"
+                })
+                .strong()
+                .size(12.5),
+            );
             ui.label(RichText::new("").size(12.5));
             ui.label(
-                RichText::new(if russian { "Дополнительный" } else { "Secondary" })
-                    .strong()
-                    .size(12.5),
+                RichText::new(if russian {
+                    "Дополнительный"
+                } else {
+                    "Secondary"
+                })
+                .strong()
+                .size(12.5),
             );
             ui.end_row();
             for (a, b) in [("A", "A+A"), ("B", "B+B"), ("C", "C+A")] {
@@ -380,13 +393,24 @@ pub fn show(ui: &mut egui::Ui, russian: bool) {
                     .size(12.5)
                     .color(warn),
                 );
-                bullets(ui, if russian { mode.minus_ru } else { mode.minus_en });
+                bullets(
+                    ui,
+                    if russian {
+                        mode.minus_ru
+                    } else {
+                        mode.minus_en
+                    },
+                );
             });
     }
 
     // --- важное замечание ---
     card(ui, note_fill(ui), |ui| {
-        ui.label(RichText::new(if russian { "Важно" } else { "Important" }).strong().size(13.5));
+        ui.label(
+            RichText::new(if russian { "Важно" } else { "Important" })
+                .strong()
+                .size(13.5),
+        );
         para(
             ui,
             if russian {
@@ -414,7 +438,11 @@ pub fn show(ui: &mut egui::Ui, russian: bool) {
             "Want more than presets? Curious about odd combos like B+A or A+B? Build your own restoration pipeline."
         },
     );
-    ui.label(RichText::new(if russian { "Основы" } else { "Basics" }).strong().size(13.0));
+    ui.label(
+        RichText::new(if russian { "Основы" } else { "Basics" })
+            .strong()
+            .size(13.0),
+    );
     bullets(
         ui,
         if russian {
@@ -582,14 +610,22 @@ pub fn show(ui: &mut egui::Ui, russian: bool) {
         .spacing([12.0, 4.0])
         .show(ui, |ui| {
             ui.label(
-                RichText::new(if russian { "Частота видео" } else { "Video framerate" })
-                    .strong()
-                    .size(12.5),
+                RichText::new(if russian {
+                    "Частота видео"
+                } else {
+                    "Video framerate"
+                })
+                .strong()
+                .size(12.5),
             );
             ui.label(
-                RichText::new(if russian { "Лимит (мс)" } else { "Budget (ms)" })
-                    .strong()
-                    .size(12.5),
+                RichText::new(if russian {
+                    "Лимит (мс)"
+                } else {
+                    "Budget (ms)"
+                })
+                .strong()
+                .size(12.5),
             );
             ui.end_row();
             for (fps, ms) in [("24", "41"), ("30", "33"), ("60", "16")] {

@@ -26,7 +26,7 @@ pub struct Track {
 }
 
 impl Track {
-    /// Display string mirroring `Player.sub_view / audio_view`.
+    /// Display string for audio/subtitle track menus.
     pub fn display(&self) -> String {
         match self.kind {
             TrackKind::Sub => {
@@ -109,8 +109,6 @@ pub trait MpvBackend: Send + Sync {
         None
     }
     /// True when playback reached end-of-file (for auto-advance).
-    /// Mirrors polling `eof-reached` (the Python build relies on libmpv
-    /// idle/end-file events for the same purpose).
     fn eof_reached(&self) -> bool {
         false
     }
@@ -304,7 +302,7 @@ impl MpvBackend for MockMpv {
 
 /// Real libmpv backend, available with `--features video`.
 ///
-/// Property names mirror `python-mpv` (`glsl-shaders`, `time-pos`, ...).
+/// Property names follow libmpv (`glsl-shaders`, `time-pos`, ...).
 /// Only needs `LC_NUMERIC=C`; libmpv2 handles the rest.
 #[cfg(feature = "video")]
 pub struct LibMpv {
@@ -349,7 +347,7 @@ impl LibMpv {
             // playback — the actual cause was a seek storm from the timeline
             // slider's `step_by` + `changed()`; seeks are gesture-gated now.)
             init.set_option("video-timing-offset", "0")?;
-            // URL playback (mirrors python-mpv `ytdl=True`); ignore the error
+            // URL playback; ignore the error
             // on builds without youtube-dl support so init still succeeds.
             let _ = init.set_option("ytdl", "yes");
             // Render API mode: frames go to our egui surface (see video.rs).

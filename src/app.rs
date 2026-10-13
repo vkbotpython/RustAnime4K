@@ -1,8 +1,8 @@
-//! eframe UI (port of `main.py`: `MainWindow` + all dialogs + startup logic).
+//! eframe UI: main window, all dialogs and startup logic.
 //!
-//! Layout mirrors the Qt original: top menu bar, central video surface,
+//! Layout: top menu bar, central video surface,
 //! bottom transport controls, toggleable right playlist panel, and one
-//! `egui::Window` per former `QDialog`.
+//! `egui::Window` per dialog.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -20,13 +20,12 @@ use crate::theme::{self, ColorScheme, Palette};
 #[cfg(feature = "video")]
 use crate::video::VideoRenderer;
 
-pub const APP_NAME: &str = "Anime Player";
+pub const APP_NAME: &str = "Anime4K Player";
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
-/// Slider granularity, mirrors `TIME_SCALE = 10`.
+/// Slider granularity for the seek bar (0.1 s steps).
 pub const TIME_SCALE: f64 = 10.0;
 
 /// Idle delay before the cursor auto-hides in fullscreen.
-/// (Qt original hides after ~4x100ms ticks; 2s is usable on desktop.)
 const FULLSCREEN_CURSOR_IDLE: Duration = Duration::from_millis(2000);
 /// Bottom strip (px) that reveals the control panel in fullscreen.
 const FULLSCREEN_BOTTOM_ZONE: f32 = 140.0;
@@ -41,7 +40,7 @@ const SPEEDS: &[f64] = &[
 const DONATE_CARD_SPACED: &str = "2202 2050 1464 4675";
 const DONATE_CARD_PLAIN: &str = "2202205014644675";
 
-/// `MM:SS`, or `HH:MM:SS` for videos >= 1h (mirrors `divmod` formatting).
+/// `MM:SS`, or `HH:MM:SS` for videos >= 1h.
 fn fmt_time(secs: f64) -> String {
     let total = secs.max(0.0) as u64;
     let h = total / 3600;
@@ -62,7 +61,7 @@ fn shaders_dir() -> PathBuf {
             if direct.is_dir() {
                 return direct;
             }
-            // Dev layout (`target/release/anime-player`, repo launched from
+            // Dev layout (`target/release/anime4k-player`, repo launched from
             // anywhere): walk up from the exe dir looking for assets/shaders.
             let mut dir = exe_dir.to_path_buf();
             for _ in 0..4 {
@@ -94,7 +93,7 @@ fn missing_shader_files(dir: &Path, preset: &[String]) -> Vec<String> {
 }
 
 /// Parses the safe `name=value` subset of launch parameters
-/// (replaces the Python `exec(...)`; arbitrary code is not supported).
+/// (arbitrary code is not supported).
 pub fn parse_launch_params(text: &str) -> Vec<(String, String)> {
     text.lines()
         .map(str::trim)
@@ -120,8 +119,7 @@ fn get_bool(cfg: &ConfigManager, key: &str, default: bool) -> bool {
     cfg.get(key).and_then(Value::as_bool).unwrap_or(default)
 }
 
-/// Reads the system clipboard (for the `Paste` buttons, mirroring
-/// `QGuiApplication.clipboard().text()`). Returns empty string on failure.
+/// Reads the system clipboard (for the `Paste` buttons). Returns empty string on failure.
 fn read_clipboard_text() -> String {
     arboard::Clipboard::new()
         .and_then(|mut cb| cb.get_text())
@@ -138,8 +136,8 @@ fn is_url_like(s: &str) -> bool {
     s.contains("://")
 }
 
-/// Display name for the window title / playlist, mirrors
-/// `filenames_only` (`basename` for files, part after `/` for URLs).
+/// Display name for the window title / playlist
+/// (`basename` for files, part after `/` for URLs).
 fn display_name_of(path_str: &str) -> String {
     if is_url_like(path_str) {
         path_str.rsplit('/').next().unwrap_or(path_str).to_string()
@@ -176,7 +174,7 @@ fn pick_sidecar_file(kind: &TrackKind) -> Option<PathBuf> {
     dlg.pick_file()
 }
 
-pub struct AnimePlayerApp {
+pub struct Anime4KPlayerApp {
     config: ConfigManager,
     lang: Lang,
     mpv: Arc<dyn MpvBackend>,
@@ -225,7 +223,7 @@ pub struct AnimePlayerApp {
     preset_offer_mode: String,
     preset_offer_dont_ask: bool,
 
-    // Fullscreen mouse tracking (mirrors mouseMoveEvent/update_cursor).
+    // Fullscreen mouse tracking.
     last_mouse_pos: Option<egui::Pos2>,
     last_mouse_time: Instant,
 
@@ -250,6 +248,10 @@ pub struct AnimePlayerApp {
     /// from repaint-starved (both small, yet perceived fps low) stalls.
     ui_ms_ema: f64,
     video_ms_ema: f64,
+
+    /// When the SBER card number was copied from the About dialog.
+    /// Shows a short "copied" confirmation next to the button.
+    about_copied_at: Option<Instant>,
 }
 
 /// Cached mpv state. During playback egui repaints on every video frame
@@ -279,7 +281,7 @@ struct MpvSnapshot {
     tracks: Vec<Track>,
 }
 
-impl AnimePlayerApp {
+impl Anime4KPlayerApp {
     pub fn new(
         cc: &eframe::CreationContext<'_>,
         mpv: Arc<dyn MpvBackend>,
@@ -368,6 +370,7 @@ impl AnimePlayerApp {
             pending_preset: None,
             ui_ms_ema: 0.0,
             video_ms_ema: 0.0,
+            about_copied_at: None,
         };
         app.apply_style(&cc.egui_ctx);
         app.apply_theme(&cc.egui_ctx);
@@ -381,7 +384,7 @@ impl AnimePlayerApp {
     }
 
     fn apply_theme(&self, ctx: &egui::Context) {
-        // Mirrors the Qt logic: palette base name + OS light/dark scheme.
+        // Palette base name + OS light/dark scheme.
         theme::apply(ctx, self.settings_palette, self.settings_scheme.is_dark());
     }
 
@@ -395,7 +398,7 @@ impl AnimePlayerApp {
         get_bool(&self.config, "fixedControlPanel", false)
     }
 
-    /// Window title, mirrors `setWindowTitle(f'{name} - Anime Player')`.
+    /// Window title, `"{name} - Anime4K Player"` when a file is open.
     fn refresh_title(&self, ctx: &egui::Context) {
         let title = match self.player.current_file() {
             Some(path) => {
@@ -460,8 +463,7 @@ impl AnimePlayerApp {
         }
     }
 
-    /// Copies saved config into the settings drafts and opens the dialog
-    /// (mirrors constructing a fresh `SettingsWindow` each time).
+    /// Copies saved config into the settings drafts and opens the dialog.
     fn open_settings(&mut self) {
         self.settings_lang = Lang::from_config_value(get_str(&self.config, "language").as_deref());
         self.settings_open_last = get_bool(&self.config, "onOpenLastFile", true);
@@ -530,8 +532,7 @@ impl AnimePlayerApp {
         }
     }
 
-    /// Global shortcuts, mirrors the `shortcut` properties in
-    /// `forms/main_window.ui` (Ctrl+O/Ctrl+U/F1/F2/F4/F5/F6/F11/F12/Space/
+    /// Global shortcuts (Ctrl+O/Ctrl+U/F1/F2/F4/F5/F6/F11/F12/Space/
     /// D/0/1/2/3/arrows/+/-). Skipped for single-key shortcuts while typing
     /// in a text field so text entry keeps working.
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
@@ -656,8 +657,7 @@ impl AnimePlayerApp {
         }
     }
 
-    /// Auto-advance the playlist at end-of-file (polls `eof-reached`,
-    /// the render-thread equivalent of libmpv's `end-file` event).
+    /// Auto-advance the playlist at end-of-file (polls `eof-reached`).
     /// Fires exactly once per EOF episode (see `eof_handled`).
     /// Reads the time-gated snapshot: pausing anywhere else (e.g. mid-VO
     /// reconfig, when live reads can transiently fail) must not skip files.
@@ -684,7 +684,7 @@ impl AnimePlayerApp {
 
     fn restore_startup(&mut self, cli_arg: Option<String>) {
         if let Some(arg) = cli_arg {
-            // Mirrors start_player(args): CLI arg wins, no last-file restore.
+            // CLI arg wins, no last-file restore.
             let path = Path::new(&arg);
             if path.is_file() {
                 self.player.open_file(&*self.mpv, path);
@@ -759,7 +759,7 @@ impl AnimePlayerApp {
     }
 
     fn save_on_exit(&mut self) {
-        // Mirrors Player.save_parameters.
+        // Persist current file + position for session restore.
         if let Some(file) = self.player.current_file() {
             self.config
                 .set("file", Value::String(file.to_string_lossy().into_owned()));
@@ -1006,7 +1006,7 @@ impl PresetChoice {
     }
 }
 
-impl eframe::App for AnimePlayerApp {
+impl eframe::App for Anime4KPlayerApp {
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
         #[cfg(feature = "video")]
         if let Some(renderer) = self.video.as_mut() {
@@ -1029,7 +1029,6 @@ impl eframe::App for AnimePlayerApp {
         // keeping ui() to a few ms is what lets the window stay at display
         // rate while video advances at its own rate. This 100 ms fallback
         // only drives the slider/clock UI when no video frames arrive.
-        // Mirrors the QTimer(100ms) tick.
         ctx.request_repaint_after(Duration::from_millis(100));
         self.handle_dropped_files(&ctx);
         self.handle_shortcuts(&ctx);
@@ -1068,7 +1067,7 @@ impl eframe::App for AnimePlayerApp {
 // Panels
 // ---------------------------------------------------------------------------
 
-impl AnimePlayerApp {
+impl Anime4KPlayerApp {
     fn handle_dropped_files(&mut self, ctx: &egui::Context) {
         let dropped: Vec<PathBuf> = ctx.input(|i| {
             i.raw
@@ -1079,7 +1078,7 @@ impl AnimePlayerApp {
         });
         let mut first_new = true;
         for path in dropped {
-            // Symlinks open as URLs, mirroring `os.path.islink -> open_url`.
+            // Symlinks open as URLs.
             if is_symlink(&path) {
                 let link = path.to_string_lossy().into_owned();
                 self.do_open_url(ctx, &link);
@@ -1213,7 +1212,7 @@ impl AnimePlayerApp {
         });
     }
 
-    /// Right-click menu, mirrors `MainWindow.show_context_menu`.
+    /// Right-click menu.
     fn context_menu(&mut self, ui: &mut egui::Ui) {
         if ui.button(self.t("Open file")).clicked() {
             let ctx = ui.ctx().clone();
@@ -1353,8 +1352,7 @@ impl AnimePlayerApp {
                     resp
                 })
                 .inner;
-            // Mirrors mouseReleaseEvent: single click = play/pause,
-            // double click = fullscreen.
+            // Single click = play/pause, double click = fullscreen.
             use egui::PointerButton;
             let fullscreen_click = resp.double_clicked_by(PointerButton::Primary);
             let play_click = !fullscreen_click && resp.clicked_by(PointerButton::Primary);
@@ -1475,7 +1473,6 @@ impl AnimePlayerApp {
                             egui::Slider::new(&mut slider_val, 0.0..=max)
                                 .show_value(false)
                                 .trailing_fill(true)
-                                // Mirrors Qt `pageStep 5` (5 / TIME_SCALE 10 = 0.5 s).
                                 .step_by(0.5),
                         )
                         .on_hover_text(format!("{} / {}", fmt_time(pos), fmt_time(duration)));
@@ -1667,7 +1664,7 @@ impl AnimePlayerApp {
                 let ctx = ui.ctx().clone();
                 self.do_play_index(&ctx, i);
             }
-            // Mirrors sourceInfo: folder path, or "URL" for links.
+            // Source info: folder path, or "URL" for links.
             if let Some(cur) = self.player.current_file() {
                 let s = cur.to_string_lossy();
                 if is_url_like(&s) {
@@ -1751,10 +1748,10 @@ impl AnimePlayerApp {
 }
 
 // ---------------------------------------------------------------------------
-// Dialogs (one Window per former QDialog)
+// Dialogs (one `egui::Window` per dialog)
 // ---------------------------------------------------------------------------
 
-impl AnimePlayerApp {
+impl Anime4KPlayerApp {
     fn dialogs(&mut self, ctx: &egui::Context) {
         self.settings_dialog(ctx);
         self.about_dialog(ctx);
@@ -1818,7 +1815,7 @@ impl AnimePlayerApp {
                 ui.checkbox(&mut self.settings_ask_preset, ask_preset_label);
                 ui.horizontal(|ui| {
                     ui.label(offset_label);
-                    // Mirrors QDoubleSpinBox -100..100 step 0.01.
+                    // Sound offset: -100..100 s, step 0.01.
                     ui.add(
                         egui::DragValue::new(&mut self.settings_sound_offset)
                             .speed(0.01)
@@ -1940,40 +1937,181 @@ impl AnimePlayerApp {
         let title = self.t("About");
         let about_text = self.t("About program");
         let copy_label = self.t("Copy");
-        let version = self.mpv.mpv_version();
+        let mpv_version = self.mpv.mpv_version();
+        let russian = self.lang == Lang::Russian;
+        let copied_label = if russian {
+            "Скопировано"
+        } else {
+            "Copied"
+        };
+        let copied =
+            matches!(self.about_copied_at, Some(t) if t.elapsed() < Duration::from_secs(2));
         let mut open = self.show_about;
         egui::Window::new(title)
             .open(&mut open)
             .resizable(false)
-            .min_width(420.0)
+            .min_width(460.0)
             .show(ctx, |ui| {
-                ui.horizontal(|ui| {
+                // --- шапка: иконка, название, версия, слоган ---
+                ui.vertical_centered(|ui| {
                     ui.add(
                         egui::Image::from_bytes(
-                            "bytes://anime-player-icon",
-                            include_bytes!("../assets/images/anime-player-icon.png"),
+                            "bytes://anime4k-player-icon",
+                            include_bytes!("../assets/images/anime4k-player-icon.png"),
                         )
-                        .max_width(120.0),
+                        .max_width(96.0),
                     );
-                    ui.vertical(|ui| {
-                        ui.heading(format!("{APP_NAME} v{VERSION}"));
-                        ui.label(version);
+                    ui.add_space(4.0);
+                    ui.label(egui::RichText::new(APP_NAME).size(22.0).strong());
+                    ui.label(
+                        egui::RichText::new(format!(" v{VERSION} "))
+                            .size(13.0)
+                            .strong()
+                            .color(egui::Color32::WHITE)
+                            .background_color(ui.visuals().hyperlink_color),
+                    );
+                    ui.add_space(2.0);
+                    ui.label(
+                        egui::RichText::new("Rust · egui · libmpv · Anime4K")
+                            .size(12.5)
+                            .italics()
+                            .color(ui.visuals().weak_text_color()),
+                    );
+                });
+                ui.add_space(4.0);
+                // --- стек технологий ---
+                ui.vertical_centered(|ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        for (name, color) in [
+                            ("Rust", egui::Color32::from_rgb(206, 92, 0)),
+                            ("egui", egui::Color32::from_rgb(25, 118, 210)),
+                            ("libmpv", egui::Color32::from_rgb(123, 31, 162)),
+                            ("Anime4K", egui::Color32::from_rgb(211, 47, 47)),
+                        ] {
+                            ui.label(
+                                egui::RichText::new(format!(" {name} "))
+                                    .size(12.5)
+                                    .strong()
+                                    .color(egui::Color32::WHITE)
+                                    .background_color(color),
+                            );
+                        }
                     });
                 });
-                ui.label(about_text);
                 ui.separator();
-                ui.horizontal(|ui| {
-                    ui.label("Telegram:");
-                    ui.hyperlink("https://t.me/avencoresyt");
-                });
-                ui.horizontal(|ui| {
-                    ui.label("💰 SBER:");
-                    ui.monospace(DONATE_CARD_SPACED);
-                    if ui.button(copy_label).clicked() {
-                        // Bank apps paste card numbers without spaces.
-                        ui.ctx().copy_text(DONATE_CARD_PLAIN.to_string());
-                    }
-                });
+                // --- описание ---
+                ui.add(egui::Label::new(egui::RichText::new(about_text).size(13.5)).wrap());
+                ui.add_space(4.0);
+                // --- движок и лицензия ---
+                egui::Grid::new("about_info")
+                    .num_columns(2)
+                    .spacing([12.0, 4.0])
+                    .striped(true)
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(if russian { "Движок" } else { "Engine" })
+                                .strong()
+                                .size(12.5),
+                        );
+                        ui.monospace(&mpv_version);
+                        ui.end_row();
+                        ui.label(
+                            egui::RichText::new(if russian {
+                                "Лицензия"
+                            } else {
+                                "License"
+                            })
+                            .strong()
+                            .size(12.5),
+                        );
+                        ui.monospace("GPL-3.0-or-later");
+                        ui.end_row();
+                    });
+                ui.add_space(6.0);
+                // --- связь и исходный код ---
+                egui::Frame::new()
+                    .fill(ui.visuals().faint_bg_color)
+                    .inner_margin(10.0)
+                    .corner_radius(8.0)
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        ui.visuals().widgets.noninteractive.bg_stroke.color,
+                    ))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(if russian {
+                                "Связь и исходный код"
+                            } else {
+                                "Contact & source"
+                            })
+                            .strong()
+                            .size(13.0),
+                        );
+                        ui.horizontal(|ui| {
+                            ui.label("YouTube:");
+                            ui.hyperlink("https://www.youtube.com/@avencores/");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("Telegram:");
+                            ui.hyperlink("https://t.me/avencoresyt");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("VK:");
+                            ui.hyperlink("https://vk.ru/avencoresreuploads");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label(if russian { "Дзен:" } else { "Dzen:" });
+                            ui.hyperlink("https://dzen.ru/avencores");
+                        });
+                        ui.horizontal(|ui| {
+                            ui.label("GitHub:");
+                            ui.hyperlink("https://github.com/vkbotpython/RustAnime4K");
+                        });
+                    });
+                ui.add_space(6.0);
+                // --- донат ---
+                egui::Frame::new()
+                    .fill(ui.visuals().faint_bg_color)
+                    .inner_margin(10.0)
+                    .corner_radius(8.0)
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        ui.visuals().widgets.noninteractive.bg_stroke.color,
+                    ))
+                    .show(ui, |ui| {
+                        ui.label(
+                            egui::RichText::new(if russian {
+                                "Поддержать автора"
+                            } else {
+                                "Support the author"
+                            })
+                            .strong()
+                            .size(13.0),
+                        );
+                        ui.horizontal(|ui| {
+                            ui.label(
+                                egui::RichText::new(" SBER ")
+                                    .strong()
+                                    .size(12.5)
+                                    .color(egui::Color32::WHITE)
+                                    .background_color(egui::Color32::from_rgb(46, 125, 50)),
+                            );
+                            ui.monospace(DONATE_CARD_SPACED);
+                            if ui.button(copy_label).clicked() {
+                                // Bank apps paste card numbers without spaces.
+                                ui.ctx().copy_text(DONATE_CARD_PLAIN.to_string());
+                                self.about_copied_at = Some(Instant::now());
+                            }
+                            if copied {
+                                ui.label(
+                                    egui::RichText::new(copied_label)
+                                        .strong()
+                                        .size(12.5)
+                                        .color(egui::Color32::from_rgb(46, 125, 50)),
+                                );
+                            }
+                        });
+                    });
             });
         self.show_about = open;
     }
@@ -2350,7 +2488,7 @@ impl AnimePlayerApp {
                         applied_ok = Some(ok);
                     }
                     if ui.button(cancel_label).clicked() {
-                        // Discard the draft (mirrors dialog Cancel).
+                        // Discard the draft on Cancel.
                         cancelled = true;
                     }
                 });

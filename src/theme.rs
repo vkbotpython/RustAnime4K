@@ -1,8 +1,7 @@
-//! Color themes (port of `palettes.py`).
+//! Color themes.
 //!
-//! The 9 Qt palettes become `egui::Visuals`; the selected base name is stored
-//! in config (`palette`), Light/Dark follows the OS color scheme like the
-//! Python version does via `styleHints().colorScheme()`.
+//! The 9 palettes become `egui::Visuals`; the selected base name is stored
+//! in config (`palette`), Light/Dark follows the OS color scheme.
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Palette {
@@ -39,7 +38,7 @@ impl Palette {
     }
 }
 
-/// Color-scheme branch, mirrors Qt `styleHints().colorScheme()`.
+/// Color-scheme branch.
 /// Stored in config as `colorScheme` ("System"/"Dark"/"Light").
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum ColorScheme {
@@ -72,7 +71,7 @@ impl ColorScheme {
     }
 
     /// Resolve to concrete dark/light. `System` follows the OS theme
-    /// (via the `dark-light` crate), like Qt's `colorScheme()`.
+    /// (via the `dark-light` crate).
     pub fn is_dark(self) -> bool {
         match self {
             Self::Dark => true,
@@ -82,8 +81,8 @@ impl ColorScheme {
     }
 }
 
-/// UI density styles, the egui equivalent of Qt's `QStyleFactory` themes.
-/// Stored in config as `style` (lowercased, like the Python version).
+/// UI density styles.
+/// Stored in config as `style` (lowercased).
 pub mod style {
     pub const DEFAULT: &str = "default";
     pub const COMPACT: &str = "compact";
@@ -119,7 +118,7 @@ pub mod style {
     }
 }
 
-/// Applies the palette; `dark` mirrors Qt's Light/Dark color-scheme branch.
+/// Applies the palette; `dark` selects the Light/Dark color-scheme branch.
 pub fn apply(ctx: &egui::Context, palette: Palette, dark: bool) {
     let mut visuals = if dark {
         egui::Visuals::dark()
