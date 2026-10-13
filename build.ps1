@@ -171,7 +171,14 @@ if (-not (Test-Path $Exe)) { throw "Сборка не дала $Exe" }
 
 # DLL рядом с exe, чтобы прошёл smoke-тест и запуск (как в release.yml).
 if ($Video) {
-  Copy-Item $DllPath (Join-Path $RepoRoot 'target\release\libmpv-2.dll') -Force
+  $DllDest = Join-Path $RepoRoot 'target\release\libmpv-2.dll'
+  $same = [string]::Equals(
+    [IO.Path]::GetFullPath($DllPath).TrimEnd('\', '/'),
+    [IO.Path]::GetFullPath($DllDest).TrimEnd('\', '/'),
+    [System.StringComparison]::OrdinalIgnoreCase)
+  if (-not $same) {
+    Copy-Item $DllPath $DllDest -Force
+  }
 }
 
 # --- 3. Smoke-тест -----------------------------------------------------------

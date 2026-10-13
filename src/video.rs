@@ -48,6 +48,10 @@ pub struct VideoRenderer {
     gl: Arc<glow::Context>,
     _gpa: Arc<GpaFn>,
     resources: Option<GlResources>,
+    /// Latest render failure, if any. The GUI build has no console
+    /// (`windows_subsystem`), so `eprintln!` output is invisible — the
+    /// message is surfaced in the video panel instead.
+    last_error: Option<String>,
 }
 
 impl VideoRenderer {
@@ -89,7 +93,13 @@ impl VideoRenderer {
             gl,
             _gpa: gpa,
             resources: None,
+            last_error: None,
         })
+    }
+
+    /// Latest render failure, if any (see `last_error`).
+    pub fn last_error(&self) -> Option<&str> {
+        self.last_error.as_deref()
     }
 
     /// Renders the current frame (if any) and schedules the blit for `rect`.
@@ -106,7 +116,9 @@ impl VideoRenderer {
         let res = match self.ensure_resources(size) {
             Ok(res) => res,
             Err(err) => {
-                eprintln!("video framebuffer allocation failed: {err:#}");
+                let msg = format!("video framebuffer allocation failed: {err:#}");
+                eprintln!("{msg}");
+                self.last_error = Some(msg);
                 return;
             }
         };
@@ -116,11 +128,21 @@ impl VideoRenderer {
             match res.framebuffer.0.get().try_into() {
                 Ok(fb) => {
                     if let Err(err) = self.ctx.render::<()>(fb, size.width, size.height, true) {
-                        eprintln!("mpv render failed: {err}");
+                        let msg = format!("mpv render failed: {err}");
+                        eprintln!("{msg}");
+                        self.last_error = Some(msg);
+                    } else {
+                        // Tell mpv the frame was presented: without this the
+                        // core can't tune A-V timing ("expect bad video
+                        // playback" otherwise, per the render API docs).
+                        self.ctx.report_swap();
+                        self.last_error = None;
                     }
                 }
                 Err(err) => {
-                    eprintln!("GL framebuffer id too large for libmpv: {err}");
+                    let msg = format!("GL framebuffer id too large for libmpv: {err}");
+                    eprintln!("{msg}");
+                    self.last_error = Some(msg);
                     return;
                 }
             }

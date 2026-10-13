@@ -96,6 +96,18 @@ pub trait MpvBackend: Send + Sync {
     fn is_idle(&self) -> bool {
         false
     }
+    /// True while mpv auto-paused for cache refill (demuxer starves: both
+    /// audio and video stutter in lockstep while `pause` stays false, so
+    /// without this the UI looks "playing" while the core is stalled).
+    fn paused_for_cache(&self) -> bool {
+        false
+    }
+    /// Active hardware decoder (`hwdec-current`), if any. Empty/software
+    /// decode reads back as `None`/empty; a stuck exotic decoder is the
+    /// prime suspect when frames stop with a fast/empty renderer.
+    fn hwdec_current(&self) -> Option<String> {
+        None
+    }
     /// True when playback reached end-of-file (for auto-advance).
     /// Mirrors polling `eof-reached` (the Python build relies on libmpv
     /// idle/end-file events for the same purpose).
@@ -314,6 +326,26 @@ impl LibMpv {
             // No terminal UI: this is a GUI app without a console window,
             // so mpv must not print status lines / logs to stdout.
             init.set_option("terminal", "no")?;
+            // Playback diagnostics: mpv's own log (VO/hwdec choice, shader
+            // errors, AO underruns, dropped frames) next to the exe.
+            // The GUI build has no console (windows_subsystem), so without
+            // this file stutter causes are invisible. Overwritten every
+            // start; a failed write must not fail init.
+            if let Ok(exe) = std::env::current_exe() {
+                if let Some(dir) = exe.parent() {
+                    let log_value = dir.join("mpv.log").to_string_lossy().into_owned();
+                    let _ = init.set_option("log-file", log_value.as_str());
+                }
+            }
+            // NOTE: no `video-timing-offset=0` here on purpose. With the
+            // default offset render() blocks until the target display time,
+            // pacing presentation to the video clock (audio sync mode).
+            // Setting it to 0 disables that pacing; combined with a busy
+            // repaint loop the UI thread then renders redundantly at max
+            // rate, saturates the GPU (hwdec + gpu-hq + Anime4K contend for
+            // it) and wedges A/V sync into frame-by-frame stutter with
+            // audio artifacts. Per-frame pacing comes from render() itself
+            // plus the update-callback repaints (see video.rs).
             // URL playback (mirrors python-mpv `ytdl=True`); ignore the error
             // on builds without youtube-dl support so init still succeeds.
             let _ = init.set_option("ytdl", "yes");
@@ -508,6 +540,16 @@ impl MpvBackend for LibMpv {
         self.get_opt::<bool>("idle-active")
             .or_else(|| self.get_opt::<bool>("core-idle"))
             .unwrap_or(false)
+    }
+    fn paused_for_cache(&self) -> bool {
+        self.get_opt::<bool>("paused-for-cache").unwrap_or(false)
+    }
+    fn hwdec_current(&self) -> Option<String> {
+        let cur: Option<String> = self.get_opt("hwdec-current");
+        match cur {
+            Some(s) if !s.is_empty() => Some(s),
+            _ => None,
+        }
     }
 
     #[cfg(feature = "video")]

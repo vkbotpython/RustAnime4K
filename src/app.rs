@@ -14,7 +14,7 @@ use crate::anime4k;
 use crate::config::ConfigManager;
 use crate::formats::{AUDIO_FORMATS, SUBTITLES_FORMATS, VIDEO_FORMATS};
 use crate::i18n::{self, Lang};
-use crate::mpv::{MpvBackend, TrackKind};
+use crate::mpv::{MpvBackend, Track, TrackKind};
 use crate::player::{PlayerState, MIN_RESTORE_POSITION};
 use crate::theme::{self, ColorScheme, Palette};
 #[cfg(feature = "video")]
@@ -207,6 +207,49 @@ pub struct AnimePlayerApp {
     /// after `loadfile`), so without edge detection a single EOF would
     /// restart/skip playback on every 100 ms tick.
     eof_handled: bool,
+
+    /// Last polled mpv state (see `poll_mpv`).
+    snap: MpvSnapshot,
+    /// Last snapshot poll time; polling is time-gated (see `poll_mpv`).
+    last_poll: Option<Instant>,
+    /// Preset waiting to be applied once playback metadata is in
+    /// (see `flush_pending_preset`).
+    pending_preset: Option<PresetChoice>,
+
+    /// Perf diagnostics shown in the media-info row while playing:
+    /// whole-`ui()` time and the video-panel slice of it (mpv
+    /// update()+render()+FBO upkeep; the deferred GL blit excluded).
+    /// Distinguishes render-bound (V≈UI≫16ms) from UI-bound (UI≫V)
+    /// from repaint-starved (both small, yet perceived fps low) stalls.
+    ui_ms_ema: f64,
+    video_ms_ema: f64,
+}
+
+/// Cached mpv state. During playback egui repaints on every video frame
+/// (24-60/s via the render-context update callback); doing a dozen blocking
+/// `get_property` round-trips per frame saturates the UI thread and starves
+/// the player, so all per-frame UI reads go through this snapshot instead.
+#[derive(Debug, Clone, Default)]
+struct MpvSnapshot {
+    pause: bool,
+    duration: Option<f64>,
+    time_pos: Option<f64>,
+    eof: bool,
+    volume: i32,
+    video_format: Option<String>,
+    audio_codec: Option<String>,
+    width: Option<i64>,
+    height: Option<i64>,
+    fps: Option<f64>,
+    frame_drops: Option<i64>,
+    /// Core stall flags (see `MpvBackend::paused_for_cache/hwdec_current`):
+    /// shown in media-info while playing; they distinguish demux/cache
+    /// starvation and a stuck hw decoder from a slow renderer.
+    cache_pause: bool,
+    hwdec: Option<String>,
+    /// Cached only while an audio/sub menu is open (`tracks()` fans out
+    /// into hundreds of property reads — never per frame).
+    tracks: Vec<Track>,
 }
 
 impl AnimePlayerApp {
@@ -290,6 +333,14 @@ impl AnimePlayerApp {
             last_mouse_pos: None,
             last_mouse_time: Instant::now(),
             eof_handled: false,
+            snap: MpvSnapshot {
+                volume,
+                ..Default::default()
+            },
+            last_poll: None,
+            pending_preset: None,
+            ui_ms_ema: 0.0,
+            video_ms_ema: 0.0,
         };
         app.apply_style(&cc.egui_ctx);
         app.apply_theme(&cc.egui_ctx);
@@ -356,6 +407,11 @@ impl AnimePlayerApp {
         self.player.close(&*self.mpv);
         self.config.set("opened", json!(["", ""]));
         self.show_preset_offer = false;
+        self.pending_preset = None;
+        self.eof_handled = false;
+        self.snap.duration = None;
+        self.snap.time_pos = None;
+        self.snap.pause = false;
         self.refresh_title(ctx);
     }
 
@@ -576,14 +632,16 @@ impl AnimePlayerApp {
     /// Auto-advance the playlist at end-of-file (polls `eof-reached`,
     /// the render-thread equivalent of libmpv's `end-file` event).
     /// Fires exactly once per EOF episode (see `eof_handled`).
+    /// Reads the time-gated snapshot: pausing anywhere else (e.g. mid-VO
+    /// reconfig, when live reads can transiently fail) must not skip files.
     fn check_auto_next(&mut self, ctx: &egui::Context) {
         let at_eof = self.player.current.is_some()
-            && self.mpv.duration().is_some()
-            && !self.mpv.pause()
-            && self.mpv.eof_reached();
+            && self.snap.duration.is_some()
+            && !self.snap.pause
+            && self.snap.eof;
         if !at_eof {
             // Re-arm once EOF clears (a new file is actually playing).
-            if !self.mpv.eof_reached() {
+            if !self.snap.eof {
                 self.eof_handled = false;
             }
             return;
@@ -756,24 +814,100 @@ impl AnimePlayerApp {
     }
 
     /// Called whenever the current file changes (or playback starts from
-    /// scratch): applies the saved per-file preset, otherwise offers to
-    /// choose one (unless the user opted out).
+    /// scratch): queues the saved per-file preset for application once
+    /// stable, otherwise offers to choose one (unless the user opted out).
     fn note_file_changed(&mut self) {
+        // Fresh file: drop stale state so keep-last-good can't leak the
+        // previous file's metadata into the new load.
+        self.pending_preset = None;
+        self.eof_handled = false;
+        self.snap.duration = None;
+        self.snap.time_pos = None;
+        self.snap.pause = self.mpv.pause();
         let Some(key) = self.current_file_key() else {
             self.show_preset_offer = false;
             return;
         };
         let ask = get_bool(&self.config, "askPresetOnOpen", true);
         match self.read_file_preset(&key) {
-            Some(choice) if self.apply_choice(&choice) => {
+            Some(choice) => {
+                // Applied by flush_pending_preset once metadata is in:
+                // writing glsl-shaders mid-load races VO init and wedges
+                // playback (frozen video + stalled UI thread).
+                self.pending_preset = Some(choice);
                 self.show_preset_offer = false;
             }
-            _ => {
+            None => {
                 self.show_preset_offer = ask;
             }
         }
         if self.show_preset_offer {
             self.preset_offer_dont_ask = false;
+        }
+    }
+
+    /// Refreshes the mpv snapshot, time-gated to ~10 Hz. Between polls the
+    /// UI reuses cached values, so 24-60 fps repaint storms during playback
+    /// cost zero mpv round-trips. Transient read failures keep the last good
+    /// values instead of flickering the UI.
+    fn poll_mpv(&mut self) {
+        let now = Instant::now();
+        if let Some(last) = self.last_poll {
+            if now.duration_since(last) < Duration::from_millis(100) {
+                return;
+            }
+        }
+        self.last_poll = Some(now);
+        if self.player.current.is_none() {
+            self.snap.duration = None;
+            self.snap.time_pos = None;
+            self.snap.pause = false;
+            self.snap.eof = false;
+            return;
+        }
+        // `duration` proves the core answered: only then is the `pause`
+        // read trustworthy enough to overwrite the cached value.
+        if let Some(d) = self.mpv.duration() {
+            self.snap.duration = Some(d);
+            self.snap.pause = self.mpv.pause();
+        }
+        if let Some(t) = self.mpv.time_pos() {
+            self.snap.time_pos = Some(t);
+        }
+        self.snap.eof = self.mpv.eof_reached();
+        self.snap.volume = self.mpv.volume();
+        self.snap.video_format = self.mpv.video_format();
+        self.snap.audio_codec = self.mpv.audio_codec();
+        self.snap.width = self.mpv.width();
+        self.snap.height = self.mpv.height();
+        self.snap.fps = self.mpv.fps();
+        self.snap.frame_drops = self.mpv.frame_drop_count();
+        self.snap.cache_pause = self.mpv.paused_for_cache();
+        self.snap.hwdec = self.mpv.hwdec_current();
+        if self.show_audio_menu || self.show_sub_menu {
+            self.snap.tracks = self.mpv.tracks();
+        } else {
+            self.snap.tracks.clear();
+        }
+    }
+
+    /// Applies a queued preset once playback metadata is available, i.e.
+    /// the initial VO setup is done and a shader write can't race it.
+    fn flush_pending_preset(&mut self) {
+        if self.player.current.is_none() {
+            self.pending_preset = None;
+            return;
+        }
+        if self.pending_preset.is_none() || self.snap.duration.is_none() {
+            return;
+        }
+        if let Some(choice) = self.pending_preset.take() {
+            if !self.apply_choice(&choice) {
+                // Stale stored data: fall back to offering a choice.
+                if get_bool(&self.config, "askPresetOnOpen", true) {
+                    self.show_preset_offer = true;
+                }
+            }
         }
     }
 
@@ -833,7 +967,22 @@ impl eframe::App for AnimePlayerApp {
 
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
-        // Mirrors the QTimer(100ms) tick: poll mpv state and repaint.
+        let frame_start = Instant::now();
+        // Time-gated snapshot first: everything below reads cached state,
+        // so repaint storms (every video frame) cost zero mpv round-trips.
+        self.poll_mpv();
+        self.flush_pending_preset();
+        // Per-frame repaints come from the render-context update callback
+        // (see VideoRenderer::new): it fires exactly when mpv has a new
+        // frame, so playback runs at video rate without a busy loop here.
+        // A busy request_repaint() spin would re-render the same frame
+        // redundantly at max rate, peg the UI thread/GPU (hwdec + gpu-hq +
+        // Anime4K contend for the same GPU) and wedge A/V sync into
+        // frame-by-frame stutter with audio artifacts and eventual freeze.
+        // render() itself blocks to the video clock (default
+        // video-timing-offset), pacing presentation; this 100 ms fallback
+        // only drives the slider/clock UI.
+        // Mirrors the QTimer(100ms) tick.
         ctx.request_repaint_after(Duration::from_millis(100));
         self.handle_dropped_files(&ctx);
         self.handle_shortcuts(&ctx);
@@ -858,8 +1007,13 @@ impl eframe::App for AnimePlayerApp {
         if show_playlist {
             self.playlist_panel(ui);
         }
+        let video_start = Instant::now();
         self.video_panel(ui);
+        let video_dt = video_start.elapsed().as_secs_f64() * 1000.0;
+        self.video_ms_ema += (video_dt - self.video_ms_ema) * 0.1;
         self.dialogs(&ctx);
+        let frame_dt = frame_start.elapsed().as_secs_f64() * 1000.0;
+        self.ui_ms_ema += (frame_dt - self.ui_ms_ema) * 0.05;
     }
 }
 
@@ -1118,6 +1272,12 @@ impl AnimePlayerApp {
         #[cfg(feature = "video")]
         if self.video.is_some() {
             let status = self.status.clone();
+            // Render errors are invisible without a console, so they take
+            // over the status corner until rendering recovers.
+            let render_error = self
+                .video
+                .as_ref()
+                .and_then(|r| r.last_error().map(str::to_string));
             let resp = egui::CentralPanel::default()
                 .show(ui, |ui| {
                     let available = ui.available_size();
@@ -1126,7 +1286,15 @@ impl AnimePlayerApp {
                     if let Some(renderer) = self.video.as_mut() {
                         renderer.show(ui, rect);
                     }
-                    if !status.is_empty() {
+                    if let Some(err) = render_error {
+                        ui.painter().text(
+                            rect.left_bottom() + egui::vec2(8.0, -8.0),
+                            egui::Align2::LEFT_BOTTOM,
+                            err,
+                            egui::FontId::proportional(13.0),
+                            egui::Color32::LIGHT_RED,
+                        );
+                    } else if !status.is_empty() {
                         ui.painter().text(
                             rect.left_bottom() + egui::vec2(8.0, -8.0),
                             egui::Align2::LEFT_BOTTOM,
@@ -1199,24 +1367,25 @@ impl AnimePlayerApp {
 
     fn media_info(&self) -> String {
         let codec = self
-            .mpv
-            .video_format()
-            .or_else(|| self.mpv.audio_codec())
+            .snap
+            .video_format
+            .clone()
+            .or_else(|| self.snap.audio_codec.clone())
             .unwrap_or_default()
             .to_uppercase();
-        let resolution = match (self.mpv.width(), self.mpv.height()) {
+        let resolution = match (self.snap.width, self.snap.height) {
             (Some(w), Some(h)) => format!("{w}x{h}"),
             _ => String::new(),
         };
-        let fps = match self.mpv.fps() {
+        let fps = match self.snap.fps {
             Some(f) if !resolution.is_empty() => format!("{f:.1} FPS"),
             _ => String::new(),
         };
-        let drops = match self.mpv.frame_drop_count() {
+        let drops = match self.snap.frame_drops {
             Some(n) => format!("{}: {n}", self.t("Frames lost")),
             None => String::new(),
         };
-        [
+        let mut parts = [
             self.player.preset_name.clone(),
             codec,
             resolution,
@@ -1225,14 +1394,26 @@ impl AnimePlayerApp {
         ]
         .into_iter()
         .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join(" | ")
+        .collect::<Vec<_>>();
+        // Live perf readout while playing (see ui_ms_ema/video_ms_ema).
+        if self.player.current.is_some() {
+            parts.push(format!("UI {:.0}ms", self.ui_ms_ema));
+            #[cfg(feature = "video")]
+            parts.push(format!("V {:.0}ms", self.video_ms_ema));
+            if self.snap.cache_pause {
+                parts.push("CACHE-WAIT".to_string());
+            }
+            if let Some(hw) = &self.snap.hwdec {
+                parts.push(format!("HW {hw}"));
+            }
+        }
+        parts.join(" | ")
     }
 
     fn controls_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("controls").show(ui, |ui| {
-            let duration = self.mpv.duration().unwrap_or(0.0);
-            let pos = self.mpv.time_pos().unwrap_or(0.0);
+            let duration = self.snap.duration.unwrap_or(0.0);
+            let pos = self.snap.time_pos.unwrap_or(0.0);
             let max = (duration * TIME_SCALE).max(1.0);
             let mut slider_val = pos * TIME_SCALE;
 
@@ -1251,8 +1432,22 @@ impl AnimePlayerApp {
                                 .step_by(0.5),
                         )
                         .on_hover_text(format!("{} / {}", fmt_time(pos), fmt_time(duration)));
-                    if resp.changed() {
-                        self.mpv.set_time_pos(slider_val / TIME_SCALE);
+                    // Seek on real gestures only — NEVER on bare `changed()`.
+                    // With `step_by` the slider rounds the live `time-pos`
+                    // back into `slider_val` every frame (`slider.rs`:
+                    // `set_value` rounds to the step grid, `add_contents`
+                    // then marks `changed`), so `changed()` is true on
+                    // every frame without any user input. Seeking there
+                    // resets the demuxer/decoder continuously: video crawls
+                    // frame-by-frame, audio chops into seek-bounded pieces
+                    // and playback eventually wedges. `dragged` covers
+                    // scrubbing, `clicked` covers click-to-jump; rounding
+                    // alone triggers neither.
+                    if resp.dragged() || resp.clicked() {
+                        let new_pos = slider_val / TIME_SCALE;
+                        self.mpv.set_time_pos(new_pos);
+                        // Optimistic: don't wait for the next poll tick.
+                        self.snap.time_pos = Some(new_pos);
                     }
                 });
             });
@@ -1265,7 +1460,7 @@ impl AnimePlayerApp {
                     let ctx = ui.ctx().clone();
                     self.do_prev(&ctx);
                 }
-                let playing = !self.mpv.pause() && self.mpv.duration().is_some();
+                let playing = !self.snap.pause && self.snap.duration.is_some();
                 let play_tip = if playing {
                     self.t("Pause")
                 } else {
@@ -1302,13 +1497,15 @@ impl AnimePlayerApp {
                     self.playlist_visible = !self.playlist_visible;
                 }
 
-                let mut vol = self.mpv.volume();
+                let mut vol = self.snap.volume;
                 let vmax = self.player.max_volume_self();
                 let vol_resp = ui
                     .add(egui::Slider::new(&mut vol, 0..=vmax).show_value(false))
                     .on_hover_text(format!("{}: {}%", self.t("Volume level"), vol));
                 if vol_resp.changed() {
                     self.player.set_volume(&*self.mpv, vol);
+                    // Optimistic: don't wait for the next poll tick.
+                    self.snap.volume = self.player.volume;
                     self.config.set("volume", json!(self.player.volume));
                 }
                 ui.monospace(format!("{}%", self.player.volume))
@@ -1344,10 +1541,11 @@ impl AnimePlayerApp {
         ui.group(|ui| {
             ui.label(title);
             let tracks: Vec<_> = self
-                .mpv
-                .tracks()
-                .into_iter()
+                .snap
+                .tracks
+                .iter()
                 .filter(|t| t.kind == kind)
+                .cloned()
                 .collect();
             if tracks.is_empty() {
                 ui.label(no_tracks);
@@ -1438,21 +1636,23 @@ impl AnimePlayerApp {
         if self.player.current.is_none() {
             return;
         }
-        if self.mpv.duration().is_none() {
+        if self.snap.duration.is_none() {
             // No metadata (yet): the file is either still loading or the
             // load died. Restarting the load on every click/Space while it
             // is still loading resets progress forever (flickering play
             // button, video never starts), so replay only when truly idle
-            // and just unpause otherwise. (The preset offer, if needed, was
-            // already shown when the file was opened.)
+            // and just unpause otherwise.
             if self.mpv.is_idle() {
                 if let Some(file) = self.player.current_file().cloned() {
                     self.mpv.play(&file.to_string_lossy());
                 }
             }
             self.mpv.set_pause(false);
+            self.snap.pause = false;
         } else {
-            self.mpv.set_pause(!self.mpv.pause());
+            let paused = !self.snap.pause;
+            self.mpv.set_pause(paused);
+            self.snap.pause = paused;
         }
     }
 
@@ -1461,53 +1661,45 @@ impl AnimePlayerApp {
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.player.fullscreen));
     }
 
-    /// Explicit user choice: apply a standard preset and remember it
-    /// for the current file.
+    /// Explicit user choice: remember a standard preset for the current
+    /// file; applied once playback is stable (see `flush_pending_preset`).
     fn apply_anime4k(&mut self, quality: &str, mode: &str) {
         match anime4k::create_preset(quality, mode) {
-            Ok(preset) => {
-                let value = anime4k::preset_to_glsl_shaders(&shaders_dir(), &preset);
-                let name = format!("{mode} ({quality})");
-                self.player.apply_preset(&*self.mpv, &name, &value);
+            Ok(_) => {
+                let choice = PresetChoice::Standard {
+                    quality: quality.to_string(),
+                    mode: mode.to_string(),
+                };
                 if let Some(key) = self.current_file_key() {
-                    self.write_file_preset(
-                        &key,
-                        &PresetChoice::Standard {
-                            quality: quality.to_string(),
-                            mode: mode.to_string(),
-                        },
-                    );
+                    self.write_file_preset(&key, &choice);
                 }
+                self.pending_preset = Some(choice);
             }
             Err(err) => self.status = format!("{}: {err:#}", self.t("Error")),
         }
     }
 
-    /// Explicit user choice: apply an HQ preset and remember it
-    /// for the current file.
+    /// Explicit user choice: remember an HQ preset for the current file;
+    /// applied once playback is stable (see `flush_pending_preset`).
     fn apply_anime4k_hq(&mut self, name: &str) {
-        if let Some(preset) = anime4k::ultra_hq_presets().get(name) {
-            let value = anime4k::preset_to_glsl_shaders(&shaders_dir(), preset);
-            let label = format!("{name} (HQ)");
-            self.player.apply_preset(&*self.mpv, &label, &value);
+        if anime4k::ultra_hq_presets().contains_key(name) {
+            let choice = PresetChoice::Hq {
+                name: name.to_string(),
+            };
             if let Some(key) = self.current_file_key() {
-                self.write_file_preset(
-                    &key,
-                    &PresetChoice::Hq {
-                        name: name.to_string(),
-                    },
-                );
+                self.write_file_preset(&key, &choice);
             }
+            self.pending_preset = Some(choice);
         }
     }
 
-    /// Explicit user choice: disable Anime4K and remember it
-    /// for the current file.
+    /// Explicit user choice: remember "disabled" for the current file;
+    /// applied once playback is stable (see `flush_pending_preset`).
     fn disable_anime4k(&mut self) {
-        self.player.disable_anime4k(&*self.mpv);
         if let Some(key) = self.current_file_key() {
             self.write_file_preset(&key, &PresetChoice::Disabled);
         }
+        self.pending_preset = Some(PresetChoice::Disabled);
     }
 }
 
