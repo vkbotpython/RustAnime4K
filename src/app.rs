@@ -862,6 +862,11 @@ impl Anime4KPlayerApp {
             .set("androidPath", json!(self.android_path.clone()));
         self.config
             .set("launchParameters", json!(self.launch_params_text.clone()));
+        // Closed while in borderless fullscreen (`track_window_geometry`
+        // skips it): reopen as a plain maximized window, never fullscreen.
+        if self.player.fullscreen {
+            self.config.set("windowMaximized", json!(true));
+        }
         if let Err(err) = self.config.save() {
             eprintln!("cannot save config: {err:#}");
         }
