@@ -77,12 +77,22 @@
 ```text
 src/
   main.rs      CLI + запуск eframe, иконка окна
-  app.rs       главное окно + 9 диалогов
-               (настройки, о программе, URL, папка, скриншот,
-                параметры запуска, Android, справка + выбор пресета)
+  app/         главное окно и диалоги
+    mod.rs       eframe::App (цикл ui/on_exit) + реэкспорты
+    state.rs     Anime4KPlayerApp, снапшот mpv, выбор пресета, new()
+    helpers.rs   чистые функции: время, пути, диалоги выбора файлов
+    playback.rs  открытие, пресеты Anime4K, опрос mpv
+    session.rs   восстановление сессии и сохранение при выходе
+    input.rs     горячие клавиши, мышь, fullscreen, drag & drop
+    views.rs     меню, видео, транспорт, треки, плейлист
+    dialogs/    9 диалогов: settings, about, open (URL/папка),
+                screenshot, launch, android, help, preset_offer
   player.rs    логика плейлиста/громкости
-  mpv.rs       трейт MpvBackend + MockMpv
-               + LibMpv + track-list (--features video)
+  mpv/         управление mpv
+    mod.rs       трейт MpvBackend + Track/TrackKind
+    mock.rs      MockMpv для тестов и сборок без video
+    libmpv.rs    LibMpv + track-list + mpv.log (--features video)
+    files.rs     поиск новых файлов (скриншоты)
   video.rs     OpenGL render ctx libmpv
                → поверхность egui (--features video)
   config.rs    JSON-конфиг
@@ -90,8 +100,10 @@ src/
   i18n.rs      локализация
   formats.rs   расширения медиафайлов
   playlist.rs  сканирование папок
-  reference.rs структурированная справка Anime4K (карточки режимов,
-               таблицы конвейеров и шейдеров, рекомендации; EN/RU)
+  reference/   справка Anime4K (EN/RU)
+    view.rs      секции: шапка, выбор, режимы, тонкая настройка, советы
+    data.rs      режимы, шейдеры, конвейеры
+    widgets.rs   карточки, бейджи, секции
   theme.rs     палитры + тема + стили egui
 build.rs       иконка exe через winres (только Windows)
 build.ps1      локальная сборка Windows (проверки + release + dist)

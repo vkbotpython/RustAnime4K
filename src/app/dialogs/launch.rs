@@ -1,0 +1,90 @@
+//! Диалог параметров запуска.
+
+use crate::app::helpers::{get_str, parse_launch_params};
+use crate::app::state::Anime4KPlayerApp;
+use serde_json::json;
+
+impl Anime4KPlayerApp {
+    /// Copies saved launch parameters into the draft and opens the dialog.
+    pub(crate) fn open_launch(&mut self) {
+        self.launch_params_text = get_str(&self.config, "launchParameters").unwrap_or_default();
+        self.show_launch_params = true;
+    }
+
+    pub(crate) fn launch_params_dialog(&mut self, ctx: &egui::Context) {
+        if !self.show_launch_params {
+            return;
+        }
+        let title = self.t("Launch parameters");
+        let prompt = self.t("Manual launch parameters");
+        let save_label = self.t("Save");
+        let apply_label = self.t("Apply");
+        let cancel_label = self.t("Cancel");
+        let success = self.t("Success");
+        let err = self.t("Error");
+        let mut open = self.show_launch_params;
+        let mut saved = false;
+        let mut cancelled = false;
+        let mut applied_ok: Option<bool> = None;
+        egui::Window::new(title)
+            .open(&mut open)
+            .min_width(420.0)
+            .show(ctx, |ui| {
+                ui.label(prompt);
+                ui.label("name=value");
+                // Buttons pinned to the bottom, editor fills the rest with
+                // an explicit size: a fixed-rows TextEdit lets the window
+                // snap back to content height, making vertical resize
+                // impossible. Filling the allocation keeps dragged height.
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                    ui.horizontal(|ui| {
+                        if ui.button(save_label).clicked() {
+                            saved = true;
+                        }
+                        if ui.button(apply_label).clicked() {
+                            let mut ok = true;
+                            for (name, value) in
+                                parse_launch_params(&self.launch_params_text.clone())
+                            {
+                                if name == "volume" {
+                                    if let Ok(v) = value.parse::<i32>() {
+                                        self.player.set_volume(&*self.mpv, v);
+                                    } else {
+                                        ok = false;
+                                    }
+                                } else {
+                                    self.mpv.set_option_str(&name, &value);
+                                }
+                            }
+                            saved = true;
+                            applied_ok = Some(ok);
+                        }
+                        if ui.button(cancel_label).clicked() {
+                            // Discard the draft on Cancel.
+                            cancelled = true;
+                        }
+                    });
+                    let avail = ui.available_size();
+                    ui.add_sized(
+                        egui::vec2(avail.x, avail.y.max(120.0)),
+                        egui::TextEdit::multiline(&mut self.launch_params_text),
+                    );
+                });
+            });
+        if cancelled {
+            self.launch_params_text = get_str(&self.config, "launchParameters").unwrap_or_default();
+            open = false;
+        }
+        if saved {
+            self.config
+                .set("launchParameters", json!(self.launch_params_text.clone()));
+            self.flush_config();
+        }
+        match applied_ok {
+            Some(true) => self.set_status(success),
+            Some(false) => self.set_status(err),
+            None => {}
+        }
+        self.show_launch_params = open;
+    }
+}

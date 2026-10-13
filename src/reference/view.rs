@@ -1,288 +1,22 @@
-//! Красивая справка по Anime4K (замена моноширинной простыни).
-//!
-//! Рендерит структурированный документ из `assets/docs/GLSL_Instructions_*`:
-//! заголовок, шаги выбора режима, таблицы, карточки режимов, типы шейдеров.
+//! Справка по Anime4K: секции интерфейса.
 
-use egui::{Color32, RichText, Stroke};
+use egui::{Color32, RichText};
 
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-fn accent(ui: &egui::Ui) -> Color32 {
-    ui.visuals().hyperlink_color
-}
-
-fn section(ui: &mut egui::Ui, title: &str) {
-    ui.add_space(10.0);
-    ui.label(RichText::new(title).size(15.0).strong().color(accent(ui)));
-    ui.separator();
-    ui.add_space(2.0);
-}
-
-fn para(ui: &mut egui::Ui, text: &str) {
-    ui.add(egui::Label::new(RichText::new(text).size(13.5)).wrap());
-    ui.add_space(4.0);
-}
-
-fn bullets(ui: &mut egui::Ui, items: &[&str]) {
-    for item in items {
-        ui.add(egui::Label::new(RichText::new(format!("• {item}")).size(13.0)).wrap());
-    }
-    ui.add_space(4.0);
-}
-
-fn badge(text: &str, bg: Color32) -> RichText {
-    RichText::new(format!(" {text} "))
-        .strong()
-        .size(13.0)
-        .color(Color32::WHITE)
-        .background_color(bg)
-}
-
-fn mode_color(id: &str) -> Color32 {
-    match id {
-        "A" => Color32::from_rgb(211, 47, 47),
-        "B" => Color32::from_rgb(25, 118, 210),
-        "C" => Color32::from_rgb(56, 142, 60),
-        "A+A" => Color32::from_rgb(123, 31, 162),
-        "B+B" => Color32::from_rgb(0, 121, 107),
-        "C+A" => Color32::from_rgb(230, 119, 0),
-        _ => Color32::from_rgb(90, 90, 90),
-    }
-}
-
-fn card(ui: &mut egui::Ui, fill: Color32, add: impl FnOnce(&mut egui::Ui)) {
-    egui::Frame::new()
-        .fill(fill)
-        .inner_margin(10.0)
-        .corner_radius(8.0)
-        .stroke(Stroke::new(
-            1.0,
-            ui.visuals().widgets.noninteractive.bg_stroke.color,
-        ))
-        .show(ui, add);
-    ui.add_space(6.0);
-}
-
-fn card_fill(ui: &egui::Ui) -> Color32 {
-    // Лёгкая подложка поверх текущей темы (работает и в тёмной, и в светлой).
-    let base = ui.visuals().faint_bg_color;
-    // `faint_bg_color` уже полупрозрачный — делаем чуть плотнее для карточки.
-    Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 220)
-}
-
-fn note_fill(ui: &egui::Ui) -> Color32 {
-    if ui.visuals().dark_mode {
-        Color32::from_rgb(64, 50, 12)
-    } else {
-        Color32::from_rgb(255, 248, 225)
-    }
-}
-
-// ---------------------------------------------------------------------------
-// data
-// ---------------------------------------------------------------------------
-
-struct ModeInfo {
-    id: &'static str,
-    for_ru: &'static str,
-    for_en: &'static str,
-    plus_ru: &'static [&'static str],
-    plus_en: &'static [&'static str],
-    minus_ru: &'static [&'static str],
-    minus_en: &'static [&'static str],
-}
-
-const MODES: &[ModeInfo] = &[
-    ModeInfo {
-        id: "A",
-        for_ru: "Большинство аниме 1080p. Некоторые старые 720p. Большинство старых SD. Сильное размытие, много артефактов передискретизации, размазывание от сжатия.",
-        for_en: "Most 1080p anime. Some older 720p. Most old SD anime. Heavy blur, lots of resampling artifacts, smearing from compression.",
-        plus_ru: &[
-            "Высокое качество восприятия",
-            "Уменьшает артефакты сжатия",
-            "Восстанавливает наиболее повреждённые линии",
-            "Уменьшает сильное размытие и шум",
-        ],
-        plus_en: &[
-            "High perceptual quality",
-            "Reduces compression artifacts",
-            "Reconstructs most degraded lines",
-            "Reduces heavy blur and noise",
-        ],
-        minus_ru: &[
-            "Может усиливать звон, если он уже есть",
-            "Может усиливать полосатость (banding)",
-            "Сильное шумоподавление может размыть текстуры",
-        ],
-        minus_en: &[
-            "Can amplify ringing if already present",
-            "Can amplify banding if already present",
-            "Strong denoising may blur textures",
-        ],
-    },
-    ModeInfo {
-        id: "B",
-        for_ru: "Некоторые 1080p. Большинство 720p. Даунскейл 1080p → 720p. Слабое размытие, лёгкие артефакты ресемплинга, звон от даунскейла.",
-        for_en: "Some 1080p. Most 720p. 1080p → 720p downscaled anime. Light blur, some resampling artifacts, ringing from downsampling.",
-        plus_ru: &[
-            "Уменьшает артефакты сжатия",
-            "Восстанавливает часть повреждённых линий",
-            "Уменьшает размытие, шум, звон и алиасинг",
-        ],
-        plus_en: &[
-            "Reduces compression artifacts",
-            "Reconstructs some degraded lines",
-            "Reduces blur, noise, ringing and aliasing",
-        ],
-        minus_ru: &[
-            "Часть артефактов может остаться",
-            "Часть линий может остаться размытой",
-            "Сильное шумоподавление может размыть текстуры",
-        ],
-        minus_en: &[
-            "Some artifacts may remain",
-            "Some lines may stay blurry",
-            "Strong denoising may blur textures",
-        ],
-    },
-    ModeInfo {
-        id: "C",
-        for_ru: "Даунскейл 1080p → 480p. Редко — 1080p полнометражки. Чистые изображения без деградации, обои, Pixiv-арт.",
-        for_en: "1080p → 480p downscaled anime. Rarely 1080p movies. Clean images with no degradation, wallpapers, Pixiv art.",
-        plus_ru: &["Самый высокий PSNR", "Снижает шум"],
-        plus_en: &["Highest PSNR", "Reduces noise"],
-        minus_ru: &[
-            "Низкое качество восприятия",
-            "Может усиливать звон и артефакты ресемплинга",
-        ],
-        minus_en: &[
-            "Low perceptual quality",
-            "Can amplify ringing and resampling artifacts",
-        ],
-    },
-    ModeInfo {
-        id: "A+A",
-        for_ru: "То же, что и A. Только для апскейла x2 и выше.",
-        for_en: "Same as A. Only for upscaling ratios x2 and above.",
-        plus_ru: &[
-            "Высочайшее качество восприятия",
-            "Восстанавливает почти все повреждённые линии",
-        ],
-        plus_en: &[
-            "Highest perceptual quality",
-            "Reconstructs almost all degraded lines",
-        ],
-        minus_ru: &[
-            "Может дать сильный звон, полосатость, алиасинг",
-            "Медленнее, чем обычный A",
-        ],
-        minus_en: &[
-            "Can cause severe ringing, banding, aliasing",
-            "Slower than plain A",
-        ],
-    },
-    ModeInfo {
-        id: "B+B",
-        for_ru: "То же, что и B. Только для апскейла x2 и выше.",
-        for_en: "Same as B. Only for upscaling ratios x2 and above.",
-        plus_ru: &["Высокое качество восприятия, плюсы режима B"],
-        plus_en: &["High perceptual quality, same pros as B"],
-        minus_ru: &[
-            "Те же минусы, что у B (слабее выражены)",
-            "Медленнее, чем обычный B",
-        ],
-        minus_en: &["Same cons as B (milder)", "Slower than plain B"],
-    },
-    ModeInfo {
-        id: "C+A",
-        for_ru: "То же, что и C. Только для апскейла x2 и выше.",
-        for_en: "Same as C. Only for upscaling ratios x2 and above.",
-        plus_ru: &["Чуть выше качество восприятия, чем у C"],
-        plus_en: &["Slightly higher perceptual quality than C"],
-        minus_ru: &[
-            "Те же минусы, что у C (слабее выражены)",
-            "Медленнее, чем обычный C",
-        ],
-        minus_en: &["Same cons as C (milder)", "Slower than plain C"],
-    },
-];
-
-struct ShaderInfo {
-    name: &'static str,
-    ru: &'static str,
-    en: &'static str,
-}
-
-const SHADERS: &[ShaderInfo] = &[
-    ShaderInfo {
-        name: "Restore",
-        ru: "Фишка Anime4K. Восстанавливает картинку до апскейла: сжатие, размытие, звон. Restore — против апскейл-артефактов и блюра, Restore_Soft — против даунскейла и алиасинга.",
-        en: "What makes Anime4K special. Restores before upscaling: compression, blur, ringing. Restore targets upsampling blur, Restore_Soft targets downsampling and aliasing.",
-    },
-    ShaderInfo {
-        name: "Upscale",
-        ru: "Масштабирует в 2 раза, считая картинку чистой.",
-        en: "Upscales x2, assuming a clean image.",
-    },
-    ShaderInfo {
-        name: "Upscale_Denoise",
-        ru: "Масштабирует в 2 раза и давит шум без потери скорости GPU.",
-        en: "Upscales x2 and denoises with no GPU penalty.",
-    },
-    ShaderInfo {
-        name: "Clamp_Highlights",
-        ru: "Считает статистику в точке подключения и в конце режет света — меньше перерегулирования и звона.",
-        en: "Saves stats where placed, clamps highlights at the end — less overshoot and ringing.",
-    },
-    ShaderInfo {
-        name: "Darken",
-        ru: "Затемняет линии. Понятие «линия» неоднозначно — на ваш вкус.",
-        en: "Darkens lines. Ambiguous what a line is — use to taste.",
-    },
-    ShaderInfo {
-        name: "Thin",
-        ru: "Делает линии тоньше. Аналогично — на ваш вкус.",
-        en: "Thins lines. Same caveat — use to taste.",
-    },
-    ShaderInfo {
-        name: "Denoise",
-        ru: "Обычный фильтр шумоподавления.",
-        en: "Plain denoising filter.",
-    },
-    ShaderInfo {
-        name: "Deblur",
-        ru: "Повышает резкость деталей без перерегулирования и звона.",
-        en: "Sharpens details without overshoot or ringing.",
-    },
-    ShaderInfo {
-        name: "AutoDownscalePre_x4",
-        ru: "Даунскейл после первого апскейла, чтобы второй шаг x2 точно попал в экран. Между двумя Upscale.",
-        en: "Downscales after the first upscale so the second x2 step matches the screen. Between two Upscales.",
-    },
-    ShaderInfo {
-        name: "AutoDownscalePre_x2",
-        ru: "Даунскейл после первого апскейла до размера экрана. После первого Upscale.",
-        en: "Downscales after the first upscale to screen size. After the first Upscale.",
-    },
-];
-
-const PIPELINES: &[(&str, &str)] = &[
-    ("A", "Restore → Upscale → Upscale"),
-    ("B", "Restore_Soft → Upscale → Upscale"),
-    ("C", "Upscale_Denoise → Upscale"),
-    ("A+A", "Restore → Upscale → Restore → Upscale"),
-    ("B+B", "Restore_Soft → Upscale → Restore_Soft → Upscale"),
-    ("C+A", "Upscale_Denoise → Restore → Upscale"),
-];
-
-// ---------------------------------------------------------------------------
-// entry
-// ---------------------------------------------------------------------------
+use super::data::{MODES, PIPELINES, SHADERS};
+use super::widgets::{
+    accent, badge, bullets, card, card_fill, mode_color, note_fill, para, section,
+};
 
 /// Рисует содержимое справки. `russian` — язык интерфейса.
 pub fn show(ui: &mut egui::Ui, russian: bool) {
+    show_header(ui, russian);
+    show_picker(ui, russian);
+    show_modes(ui, russian);
+    show_advanced(ui, russian);
+    show_tips(ui, russian);
+}
+
+fn show_header(ui: &mut egui::Ui, russian: bool) {
     // --- шапка ---
     let title = if russian {
         "Инструкция по Anime4K"
@@ -309,7 +43,9 @@ pub fn show(ui: &mut egui::Ui, russian: bool) {
             }
         });
     });
+}
 
+fn show_picker(ui: &mut egui::Ui, russian: bool) {
     // --- как выбрать ---
     section(
         ui,
@@ -399,7 +135,9 @@ pub fn show(ui: &mut egui::Ui, russian: bool) {
             }
         });
     ui.add_space(4.0);
+}
 
+fn show_modes(ui: &mut egui::Ui, russian: bool) {
     // --- карточки режимов ---
     section(
         ui,
@@ -466,7 +204,9 @@ pub fn show(ui: &mut egui::Ui, russian: bool) {
             },
         );
     });
+}
 
+fn show_advanced(ui: &mut egui::Ui, russian: bool) {
     // --- расширенная настройка ---
     section(
         ui,
@@ -620,7 +360,9 @@ pub fn show(ui: &mut egui::Ui, russian: bool) {
             },
         );
     });
+}
 
+fn show_tips(ui: &mut egui::Ui, russian: bool) {
     // --- рекомендации ---
     section(
         ui,
