@@ -7,8 +7,11 @@
   fmt + clippy + test, затем cargo build --release [--features video],
   smoke-тест (--help) и сборка папки dist/anime4k-player (exe + libmpv-2.dll
   + shaders/images/docs + favicon + README + LICENSE).
-  Для линковки фичи video используется готовый mpvlib-local/mpv.lib:
-    $env:RUSTFLAGS="-L<repo>/mpvlib-local"
+  Для линковки фичи video используется готовый mpvlib-local/mpv.lib, путь
+  к нему задан в одном месте — .cargo/config.toml (build.rustflags),
+  поэтому одинаков у ручных `cargo ...` и у скриптов. Иначе cargo
+  пересобирал бы все зависимости при каждом переключении (флаги входят
+  в отпечаток каждого крейта):
   libmpv-2.dll ищется в: -MpvDll, ./libmpv-2.dll, ./mpvlib-local/,
   ./target/release/. Нет DLL — положи её в одно из этих мест или
   используй -DownloadMpv (скачает mpv-dev и соберёт mpv.lib, нужны
@@ -134,8 +137,9 @@ if ($Video) {
   }
   Write-Host "mpv.lib : $MpvLib"
   Write-Host "mpv dll : $DllPath"
-  # Однобуквенная форма -L<путь> — один токен, переживает пробелы в пути.
-  $env:RUSTFLAGS = ("$env:RUSTFLAGS -L$LibDir").Trim()
+  # NB: RUSTFLAGS здесь НЕ трогаем: -L уже задан в .cargo/config.toml.
+  # Дописывание (-L...) в env меняло бы отпечатки крейтов относительно
+  # ручных вызовов cargo и провоцировало полную пересборку зависимостей.
 }
 
 # --- 1. Проверки (как lint-test в CI) ---------------------------------------

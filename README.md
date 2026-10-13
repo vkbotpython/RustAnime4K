@@ -146,7 +146,9 @@ packaging/     windows/installer.iss + linux/.desktop
 ```
 
 Windows, фича `video`: для линковки используется `mpvlib-local/mpv.lib`
-(`RUSTFLAGS=-Lmpvlib-local` скрипт выставляет сам), а `libmpv-2.dll` ищется
+(путь `-L` задан в `.cargo/config.toml`, поэтому одинаков у скриптов и у
+ручных вызовов cargo — это сохраняет общий кэш в `target/`),
+а `libmpv-2.dll` ищется
 в `./libmpv-2.dll`, `./mpvlib-local/`, `./target/release/` или указывается
 через `-MpvDll <путь>`. Готовый пакет лежит в `dist/anime4k-player/` — его
 можно запускать прямо оттуда.
@@ -179,10 +181,11 @@ Windows: нужна пара import-библиотека + DLL с именами
 (`libmpv2-sys` линкует `cargo:rustc-link-lib=mpv`). Официальные сборки mpv
 поставляют `libmpv-2.dll`, поэтому либо сгенерируй import-библиотеку из неё
 (так делает наш `release.yml`: `dumpbin /exports` → `.def` → `lib.exe`),
-либо возьми пакет с `mpv.lib` (например, vcpkg), затем:
+либо возьми пакет с `mpv.lib` (например, vcpkg), положи `mpv.lib` в
+`mpvlib-local/` (этот путь уже прописан в `.cargo/config.toml`, ничего
+дополнительно выставлять не нужно), затем:
 
 ```powershell
-$env:RUSTFLAGS='-L <каталог с mpv.lib>'
 cargo run --features video
 ```
 
