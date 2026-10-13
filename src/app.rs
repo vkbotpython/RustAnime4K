@@ -1331,8 +1331,15 @@ impl Anime4KPlayerApp {
                 .and_then(|r| r.last_error().map(str::to_string));
             let resp = egui::CentralPanel::default()
                 .show(ui, |ui| {
+                    // A wide playlist can starve the center of space: clamp
+                    // the allocation so a negative size can't invert the rect
+                    // and splat paint outside the panel.
                     let available = ui.available_size();
+                    let available = egui::vec2(available.x.max(0.0), available.y.max(0.0));
                     let (rect, resp) = ui.allocate_exact_size(available, egui::Sense::click());
+                    if rect.width() <= 0.0 || rect.height() <= 0.0 {
+                        return resp;
+                    }
                     ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
                     if let Some(renderer) = self.video.as_mut() {
                         renderer.show(ui, rect);
@@ -1375,8 +1382,13 @@ impl Anime4KPlayerApp {
         let mut clicked_play = false;
         let mut clicked_fullscreen = false;
         egui::CentralPanel::default().show(ui, |ui| {
+            // Same degenerate-rect guard as the video branch above.
             let available = ui.available_size();
+            let available = egui::vec2(available.x.max(0.0), available.y.max(0.0));
             let (rect, resp) = ui.allocate_exact_size(available, egui::Sense::click());
+            if rect.width() <= 0.0 || rect.height() <= 0.0 {
+                return;
+            }
             ui.painter().rect_filled(rect, 0.0, egui::Color32::BLACK);
             if self.player.current.is_none() {
                 ui.painter().text(
@@ -1655,33 +1667,59 @@ impl Anime4KPlayerApp {
     }
 
     fn playlist_panel(&mut self, ui: &mut egui::Ui) {
-        egui::Panel::right("playlist").show(ui, |ui| {
-            ui.heading(self.t("Playlist"));
-            let names = self.player.filenames_only();
-            let current = self.player.current;
-            let mut chosen: Option<usize> = None;
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for (i, name) in names.iter().enumerate() {
-                    let selected = current == Some(i);
-                    if ui.selectable_label(selected, name).clicked() {
-                        chosen = Some(i);
+        // Drag width persists across frames: without a cap the panel can be
+        // pulled wider than the window allows (or outlive a window shrink
+        // while wide), starving the video of space. Clamp to a viewport
+        // fraction. Content is separately forced to fill the full width
+        // below so the frame never leaves an unpainted strip.
+        const MIN_WIDTH: f32 = 200.0;
+        let max_width = (ui.ctx().viewport_rect().width() * 0.45).max(MIN_WIDTH);
+        egui::Panel::right("playlist")
+            .size_range(MIN_WIDTH..=max_width)
+            .show(ui, |ui| {
+                ui.heading(self.t("Playlist"));
+                let names = self.player.filenames_only();
+                let current = self.player.current;
+                let mut chosen: Option<usize> = None;
+                // NB: a vertical ScrollArea shrinks horizontally to fit its
+                // content by default. The panel frame then covers only the
+                // text width and anything dragged wider stays unpainted
+                // (black strip). Forcing full width keeps the frame over
+                // the whole allocation.
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| {
+                        // Stretch rows across the full width so the highlight
+                        // and the frame cover the whole panel, not just text.
+                        ui.set_width(ui.available_width());
+                        for (i, name) in names.iter().enumerate() {
+                            let selected = current == Some(i);
+                            if ui.selectable_label(selected, name).clicked() {
+                                chosen = Some(i);
+                            }
+                        }
+                    });
+                if let Some(i) = chosen {
+                    let ctx = ui.ctx().clone();
+                    self.do_play_index(&ctx, i);
+                }
+                // Source info: folder path, or "URL" for links.
+                // Truncated: with the width capped, a long path must not
+                // paint past the panel frame.
+                if let Some(cur) = self.player.current_file() {
+                    let s = cur.to_string_lossy();
+                    if is_url_like(&s) {
+                        ui.monospace("URL");
+                    } else if let Some(parent) = cur.parent() {
+                        ui.add(
+                            egui::Label::new(
+                                egui::RichText::new(parent.to_string_lossy()).monospace(),
+                            )
+                            .truncate(),
+                        );
                     }
                 }
             });
-            if let Some(i) = chosen {
-                let ctx = ui.ctx().clone();
-                self.do_play_index(&ctx, i);
-            }
-            // Source info: folder path, or "URL" for links.
-            if let Some(cur) = self.player.current_file() {
-                let s = cur.to_string_lossy();
-                if is_url_like(&s) {
-                    ui.monospace("URL");
-                } else if let Some(parent) = cur.parent() {
-                    ui.monospace(parent.to_string_lossy());
-                }
-            }
-        });
     }
 
     fn toggle_play(&mut self) {
