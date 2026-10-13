@@ -11,6 +11,7 @@ mod i18n;
 mod mpv;
 mod player;
 mod playlist;
+mod reference;
 mod theme;
 #[cfg(feature = "video")]
 mod video;

@@ -2444,19 +2444,20 @@ impl AnimePlayerApp {
             return;
         }
         let title = self.t("Reference");
-        let text = if self.lang == Lang::Russian {
-            include_str!("../assets/docs/GLSL_Instructions_Advanced_ru.txt")
-        } else {
-            include_str!("../assets/docs/GLSL_Instructions_Advanced.txt")
-        };
+        let russian = self.lang == Lang::Russian;
         let mut open = self.show_reference;
         egui::Window::new(title)
             .open(&mut open)
-            .default_size([560.0, 420.0])
+            .default_size([680.0, 560.0])
+            .min_width(540.0)
+            .resizable(true)
             .show(ctx, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| {
-                    ui.monospace(text);
-                });
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false; 2])
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+                        crate::reference::show(ui, russian);
+                    });
             });
         self.show_reference = open;
     }
