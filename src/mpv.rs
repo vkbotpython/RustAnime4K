@@ -347,15 +347,19 @@ impl LibMpv {
             // Playback diagnostics: mpv's own log (VO/hwdec choice, shader
             // errors, AO underruns, dropped frames) next to the exe.
             // The GUI build has no console (windows_subsystem), so without
-            // this file stutter causes are invisible. Overwritten every
-            // start; a failed write must not fail init.
-            let log_dir = std::env::current_exe()
-                .ok()
-                .and_then(|exe| exe.parent().map(|p| p.to_path_buf()));
-            if let Some(dir) = log_dir {
-                let log_value = dir.join("mpv.log").to_string_lossy().into_owned();
+            // this file stutter causes are invisible. Fresh file every
+            // start + capped while running (see `cap_mpv_log`): mpv only
+            // appends, so otherwise the log grows without bound. A failed
+            // write must not fail init.
+            if let Some(path) = mpv_log_path() {
+                let _ = std::fs::write(&path, "");
+                let log_value = path.to_string_lossy().into_owned();
                 let _ = init.set_option("log-file", log_value.as_str());
             }
+            // Quieter log: warnings/errors plus *what* is playing and with
+            // which VO (`cplayer`); routine per-chunk info no longer
+            // inflates the file.
+            let _ = init.set_option("msg-level", "all=warn,cplayer=info");
             // Non-blocking render(): with the default timing offset render()
             // sleeps until the target display time, and since it runs on the
             // UI thread the whole window would tick at video rate (~41 ms
@@ -609,6 +613,43 @@ pub(crate) fn find_new_file(before: &[String], dir: &std::path::Path) -> Option<
         .find(|name| !before.iter().any(|b| b == name))
 }
 
+/// Hard cap for `mpv.log`: mpv only appends, so without rotation the file
+/// grows without bound (see `cap_mpv_log`).
+#[cfg(feature = "video")]
+pub const MPV_LOG_LIMIT_BYTES: u64 = 512 * 1024;
+
+/// Path of the mpv log file (next to the exe), if determinable.
+#[cfg(feature = "video")]
+pub fn mpv_log_path() -> Option<std::path::PathBuf> {
+    std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(|p| p.to_path_buf()))
+        .map(|dir| dir.join("mpv.log"))
+}
+
+/// Truncates `path` when it exceeds `MPV_LOG_LIMIT_BYTES`. mpv keeps the
+/// file open in append mode, so truncating from our side is safe: the next
+/// message lands at the new end. Never fails.
+#[cfg(feature = "video")]
+fn truncate_log_if_large(path: &std::path::Path) {
+    let over = std::fs::metadata(path)
+        .map(|m| m.len() > MPV_LOG_LIMIT_BYTES)
+        .unwrap_or(false);
+    if over {
+        let _ = std::fs::write(path, "");
+    }
+}
+
+/// Caps `mpv.log` at `MPV_LOG_LIMIT_BYTES` (see `truncate_log_if_large`).
+/// Called at startup (after a fresh truncate in `LibMpv::new`) and
+/// periodically while running, so the log can never take much disk space.
+#[cfg(feature = "video")]
+pub fn cap_mpv_log() {
+    if let Some(path) = mpv_log_path() {
+        truncate_log_if_large(&path);
+    }
+}
+
 /// `dir` + per-shot file name for the mock backend's stand-in screenshot.
 fn dir_file(dir: String, n: u32) -> std::path::PathBuf {
     std::path::Path::new(&dir).join(format!("mock-shot-{n}.bmp"))
@@ -736,5 +777,21 @@ mod tests {
         mpv.screenshot().unwrap();
         assert!(nested.is_dir());
         assert_eq!(dir_file_names(&nested).len(), 1);
+    }
+
+    #[test]
+    #[cfg(feature = "video")]
+    fn oversized_log_is_truncated_small_log_is_kept() {
+        let dir = tempfile::tempdir().unwrap();
+        let big = dir.path().join("big.log");
+        let small = dir.path().join("small.log");
+        std::fs::write(&big, vec![b'x'; MPV_LOG_LIMIT_BYTES as usize + 1]).unwrap();
+        std::fs::write(&small, b"short").unwrap();
+        truncate_log_if_large(&big);
+        truncate_log_if_large(&small);
+        assert_eq!(std::fs::metadata(&big).unwrap().len(), 0);
+        assert_eq!(std::fs::read(&small).unwrap(), b"short");
+        // Missing file: no panic, no file created.
+        truncate_log_if_large(&dir.path().join("absent.log"));
     }
 }

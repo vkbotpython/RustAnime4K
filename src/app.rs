@@ -249,6 +249,10 @@ pub struct Anime4KPlayerApp {
     /// Last disk flush of the window geometry (see `track_window_geometry`).
     last_window_save: Option<Instant>,
 
+    /// Last `mpv.log` size-cap check (see `crate::mpv::cap_mpv_log`).
+    #[cfg(feature = "video")]
+    last_log_cap: Option<Instant>,
+
     /// Set once the current EOF episode has been handled. `eof-reached`
     /// stays true across frames (and can briefly report a stale value right
     /// after `loadfile`), so without edge detection a single EOF would
@@ -402,6 +406,8 @@ impl Anime4KPlayerApp {
             last_mouse_time: Instant::now(),
             click_play_armed_at: None,
             last_window_save: None,
+            #[cfg(feature = "video")]
+            last_log_cap: None,
             eof_handled: false,
             snap: MpvSnapshot {
                 volume,
@@ -1130,6 +1136,19 @@ impl eframe::App for Anime4KPlayerApp {
             self.click_play_armed_at = None;
         }
         self.track_window_geometry(&ctx);
+        // mpv only appends to `mpv.log`: re-cap it once a minute so a spammy
+        // session can never eat much disk (startup starts fresh, see `mpv.rs`).
+        #[cfg(feature = "video")]
+        {
+            let now = Instant::now();
+            if self
+                .last_log_cap
+                .is_none_or(|t| now.duration_since(t) >= Duration::from_secs(60))
+            {
+                self.last_log_cap = Some(now);
+                crate::mpv::cap_mpv_log();
+            }
+        }
         // Per-frame repaints come from the render-context update callback
         // (see VideoRenderer::new): it fires exactly when mpv has a new
         // frame, so playback runs at video rate without a busy loop here.
