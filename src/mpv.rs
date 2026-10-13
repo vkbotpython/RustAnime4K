@@ -90,6 +90,12 @@ pub trait MpvBackend: Send + Sync {
     fn add_sub_file(&self, path: &str);
     fn add_audio_file(&self, path: &str);
     fn mpv_version(&self) -> String;
+    /// True when nothing is loaded (mirrors `idle-active`).
+    /// Used to tell "still loading, don't touch it" apart from
+    /// "dead load, safe to (re)start".
+    fn is_idle(&self) -> bool {
+        false
+    }
     /// True when playback reached end-of-file (for auto-advance).
     /// Mirrors polling `eof-reached` (the Python build relies on libmpv
     /// idle/end-file events for the same purpose).
@@ -497,6 +503,11 @@ impl MpvBackend for LibMpv {
     }
     fn eof_reached(&self) -> bool {
         self.get_opt::<bool>("eof-reached").unwrap_or(false)
+    }
+    fn is_idle(&self) -> bool {
+        self.get_opt::<bool>("idle-active")
+            .or_else(|| self.get_opt::<bool>("core-idle"))
+            .unwrap_or(false)
     }
 
     #[cfg(feature = "video")]

@@ -201,6 +201,12 @@ pub struct AnimePlayerApp {
     // Fullscreen mouse tracking (mirrors mouseMoveEvent/update_cursor).
     last_mouse_pos: Option<egui::Pos2>,
     last_mouse_time: Instant,
+
+    /// Set once the current EOF episode has been handled. `eof-reached`
+    /// stays true across frames (and can briefly report a stale value right
+    /// after `loadfile`), so without edge detection a single EOF would
+    /// restart/skip playback on every 100 ms tick.
+    eof_handled: bool,
 }
 
 impl AnimePlayerApp {
@@ -283,6 +289,7 @@ impl AnimePlayerApp {
             config,
             last_mouse_pos: None,
             last_mouse_time: Instant::now(),
+            eof_handled: false,
         };
         app.apply_style(&cc.egui_ctx);
         app.apply_theme(&cc.egui_ctx);
@@ -568,17 +575,25 @@ impl AnimePlayerApp {
 
     /// Auto-advance the playlist at end-of-file (polls `eof-reached`,
     /// the render-thread equivalent of libmpv's `end-file` event).
+    /// Fires exactly once per EOF episode (see `eof_handled`).
     fn check_auto_next(&mut self, ctx: &egui::Context) {
-        if self.player.current.is_none() || self.mpv.pause() {
+        let at_eof = self.player.current.is_some()
+            && self.mpv.duration().is_some()
+            && !self.mpv.pause()
+            && self.mpv.eof_reached();
+        if !at_eof {
+            // Re-arm once EOF clears (a new file is actually playing).
+            if !self.mpv.eof_reached() {
+                self.eof_handled = false;
+            }
             return;
         }
-        if !self.mpv.eof_reached() {
+        if self.eof_handled {
             return;
         }
-        // Advance once per EOF; if there is no next file, keep the last
-        // frame on screen (matches `keep-open=yes`).
+        self.eof_handled = true;
         if self.player.next(&*self.mpv) {
-            self.refresh_title(ctx);
+            self.after_file_changed(ctx);
         }
     }
 
@@ -1424,12 +1439,18 @@ impl AnimePlayerApp {
             return;
         }
         if self.mpv.duration().is_none() {
-            if let Some(file) = self.player.current_file().cloned() {
-                self.mpv.play(&file.to_string_lossy());
-                self.mpv.set_pause(false);
-                // Playback (re)starts from scratch: offer a preset if needed.
-                self.note_file_changed();
+            // No metadata (yet): the file is either still loading or the
+            // load died. Restarting the load on every click/Space while it
+            // is still loading resets progress forever (flickering play
+            // button, video never starts), so replay only when truly idle
+            // and just unpause otherwise. (The preset offer, if needed, was
+            // already shown when the file was opened.)
+            if self.mpv.is_idle() {
+                if let Some(file) = self.player.current_file().cloned() {
+                    self.mpv.play(&file.to_string_lossy());
+                }
             }
+            self.mpv.set_pause(false);
         } else {
             self.mpv.set_pause(!self.mpv.pause());
         }
