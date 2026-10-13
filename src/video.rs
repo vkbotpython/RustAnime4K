@@ -8,14 +8,14 @@
 //! renderer is driven by **our** `Mpv` handle, so Anime4K `glsl-shaders`,
 //! track selection and every other property keep working on the same core.
 
-use std::ffi::{c_void, CString};
+use std::ffi::{CString, c_void};
 use std::sync::Arc;
 
 use eframe::glow::{self, HasContext as _};
-use libmpv2::render::{
-    mpv_render_update, OpenGLInitParams, RenderContext, RenderParam, RenderParamApiType,
-};
 use libmpv2::Mpv;
+use libmpv2::render::{
+    OpenGLInitParams, RenderContext, RenderParam, RenderParamApiType, mpv_render_update,
+};
 
 type GpaFn = dyn Fn(&str) -> *mut c_void + Send + Sync;
 

@@ -189,7 +189,10 @@ const MODES: &[ModeInfo] = &[
         for_en: "Same as B. Only for upscaling ratios x2 and above.",
         plus_ru: &["Высокое качество восприятия, плюсы режима B"],
         plus_en: &["High perceptual quality, same pros as B"],
-        minus_ru: &["Те же минусы, что у B (слабее выражены)", "Медленнее, чем обычный B"],
+        minus_ru: &[
+            "Те же минусы, что у B (слабее выражены)",
+            "Медленнее, чем обычный B",
+        ],
         minus_en: &["Same cons as B (milder)", "Slower than plain B"],
     },
     ModeInfo {
@@ -198,7 +201,10 @@ const MODES: &[ModeInfo] = &[
         for_en: "Same as C. Only for upscaling ratios x2 and above.",
         plus_ru: &["Чуть выше качество восприятия, чем у C"],
         plus_en: &["Slightly higher perceptual quality than C"],
-        minus_ru: &["Те же минусы, что у C (слабее выражены)", "Медленнее, чем обычный C"],
+        minus_ru: &[
+            "Те же минусы, что у C (слабее выражены)",
+            "Медленнее, чем обычный C",
+        ],
         minus_en: &["Same cons as C (milder)", "Slower than plain C"],
     },
 ];
@@ -210,16 +216,56 @@ struct ShaderInfo {
 }
 
 const SHADERS: &[ShaderInfo] = &[
-    ShaderInfo { name: "Restore", ru: "Фишка Anime4K. Восстанавливает картинку до апскейла: сжатие, размытие, звон. Restore — против апскейл-артефактов и блюра, Restore_Soft — против даунскейла и алиасинга.", en: "What makes Anime4K special. Restores before upscaling: compression, blur, ringing. Restore targets upsampling blur, Restore_Soft targets downsampling and aliasing." },
-    ShaderInfo { name: "Upscale", ru: "Масштабирует в 2 раза, считая картинку чистой.", en: "Upscales x2, assuming a clean image." },
-    ShaderInfo { name: "Upscale_Denoise", ru: "Масштабирует в 2 раза и давит шум без потери скорости GPU.", en: "Upscales x2 and denoises with no GPU penalty." },
-    ShaderInfo { name: "Clamp_Highlights", ru: "Считает статистику в точке подключения и в конце режет света — меньше перерегулирования и звона.", en: "Saves stats where placed, clamps highlights at the end — less overshoot and ringing." },
-    ShaderInfo { name: "Darken", ru: "Затемняет линии. Понятие «линия» неоднозначно — на ваш вкус.", en: "Darkens lines. Ambiguous what a line is — use to taste." },
-    ShaderInfo { name: "Thin", ru: "Делает линии тоньше. Аналогично — на ваш вкус.", en: "Thins lines. Same caveat — use to taste." },
-    ShaderInfo { name: "Denoise", ru: "Обычный фильтр шумоподавления.", en: "Plain denoising filter." },
-    ShaderInfo { name: "Deblur", ru: "Повышает резкость деталей без перерегулирования и звона.", en: "Sharpens details without overshoot or ringing." },
-    ShaderInfo { name: "AutoDownscalePre_x4", ru: "Даунскейл после первого апскейла, чтобы второй шаг x2 точно попал в экран. Между двумя Upscale.", en: "Downscales after the first upscale so the second x2 step matches the screen. Between two Upscales." },
-    ShaderInfo { name: "AutoDownscalePre_x2", ru: "Даунскейл после первого апскейла до размера экрана. После первого Upscale.", en: "Downscales after the first upscale to screen size. After the first Upscale." },
+    ShaderInfo {
+        name: "Restore",
+        ru: "Фишка Anime4K. Восстанавливает картинку до апскейла: сжатие, размытие, звон. Restore — против апскейл-артефактов и блюра, Restore_Soft — против даунскейла и алиасинга.",
+        en: "What makes Anime4K special. Restores before upscaling: compression, blur, ringing. Restore targets upsampling blur, Restore_Soft targets downsampling and aliasing.",
+    },
+    ShaderInfo {
+        name: "Upscale",
+        ru: "Масштабирует в 2 раза, считая картинку чистой.",
+        en: "Upscales x2, assuming a clean image.",
+    },
+    ShaderInfo {
+        name: "Upscale_Denoise",
+        ru: "Масштабирует в 2 раза и давит шум без потери скорости GPU.",
+        en: "Upscales x2 and denoises with no GPU penalty.",
+    },
+    ShaderInfo {
+        name: "Clamp_Highlights",
+        ru: "Считает статистику в точке подключения и в конце режет света — меньше перерегулирования и звона.",
+        en: "Saves stats where placed, clamps highlights at the end — less overshoot and ringing.",
+    },
+    ShaderInfo {
+        name: "Darken",
+        ru: "Затемняет линии. Понятие «линия» неоднозначно — на ваш вкус.",
+        en: "Darkens lines. Ambiguous what a line is — use to taste.",
+    },
+    ShaderInfo {
+        name: "Thin",
+        ru: "Делает линии тоньше. Аналогично — на ваш вкус.",
+        en: "Thins lines. Same caveat — use to taste.",
+    },
+    ShaderInfo {
+        name: "Denoise",
+        ru: "Обычный фильтр шумоподавления.",
+        en: "Plain denoising filter.",
+    },
+    ShaderInfo {
+        name: "Deblur",
+        ru: "Повышает резкость деталей без перерегулирования и звона.",
+        en: "Sharpens details without overshoot or ringing.",
+    },
+    ShaderInfo {
+        name: "AutoDownscalePre_x4",
+        ru: "Даунскейл после первого апскейла, чтобы второй шаг x2 точно попал в экран. Между двумя Upscale.",
+        en: "Downscales after the first upscale so the second x2 step matches the screen. Between two Upscales.",
+    },
+    ShaderInfo {
+        name: "AutoDownscalePre_x2",
+        ru: "Даунскейл после первого апскейла до размера экрана. После первого Upscale.",
+        en: "Downscales after the first upscale to screen size. After the first Upscale.",
+    },
 ];
 
 const PIPELINES: &[(&str, &str)] = &[

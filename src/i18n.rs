@@ -171,11 +171,7 @@ pub fn detect_system_lang() -> Lang {
     let loc = locale.to_lowercase();
     // Script/region disambiguation first.
     if loc.starts_with("zh") {
-        if loc.contains("tw")
-            || loc.contains("hk")
-            || loc.contains("hant")
-            || loc.contains("mo")
-        {
+        if loc.contains("tw") || loc.contains("hk") || loc.contains("hant") || loc.contains("mo") {
             return Lang::ChineseTraditional;
         }
         return Lang::ChineseSimplified;

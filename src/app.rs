@@ -8,14 +8,14 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use crate::anime4k;
 use crate::config::ConfigManager;
 use crate::formats::{AUDIO_FORMATS, SUBTITLES_FORMATS, VIDEO_FORMATS};
 use crate::i18n::{self, Lang};
 use crate::mpv::{MpvBackend, Track, TrackKind};
-use crate::player::{PlayerState, MIN_RESTORE_POSITION};
+use crate::player::{MIN_RESTORE_POSITION, PlayerState};
 use crate::theme::{self, ColorScheme, Palette};
 #[cfg(feature = "video")]
 use crate::video::VideoRenderer;
@@ -55,27 +55,28 @@ fn fmt_time(secs: f64) -> String {
 
 fn shaders_dir() -> PathBuf {
     // Install/dist layout: shaders next to the exe.
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(exe_dir) = exe.parent() {
-            let direct = exe_dir.join("shaders");
-            if direct.is_dir() {
-                return direct;
-            }
-            // Dev layout (`target/release/anime4k-player`, repo launched from
-            // anywhere): walk up from the exe dir looking for assets/shaders.
-            let mut dir = exe_dir.to_path_buf();
-            for _ in 0..4 {
-                let cand = dir.join("assets").join("shaders");
-                if cand.is_dir() {
-                    return cand;
-                }
-                if !dir.pop() {
-                    break;
-                }
-            }
-            // Install layout, even if (currently) missing — callers report it.
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|exe| exe.parent().map(Path::to_path_buf));
+    if let Some(exe_dir) = exe_dir {
+        let direct = exe_dir.join("shaders");
+        if direct.is_dir() {
             return direct;
         }
+        // Dev layout (`target/release/anime4k-player`, repo launched from
+        // anywhere): walk up from the exe dir looking for assets/shaders.
+        let mut dir = exe_dir;
+        for _ in 0..4 {
+            let cand = dir.join("assets").join("shaders");
+            if cand.is_dir() {
+                return cand;
+            }
+            if !dir.pop() {
+                break;
+            }
+        }
+        // Install layout, even if (currently) missing — callers report it.
+        return direct;
     }
     // Repo-root launch (CWD-dependent last resort).
     PathBuf::from("assets/shaders")
@@ -708,33 +709,34 @@ impl Anime4KPlayerApp {
         if !pos_last {
             position = 0.0;
         }
-        if open_last {
-            if let Some(opened) = self.config.get("opened").and_then(Value::as_array) {
-                let kind = opened.first().and_then(Value::as_str).unwrap_or("");
-                let target = opened.get(1).and_then(Value::as_str).unwrap_or("");
-                match kind {
-                    "file" if Path::new(target).exists() => {
-                        self.player.open_file(&*self.mpv, Path::new(target));
-                        self.mpv.set_pause(true);
-                    }
-                    "url" if !target.is_empty() => {
-                        self.player.open_url(&*self.mpv, target);
-                        self.mpv.set_pause(true);
-                    }
-                    "folder" if Path::new(target).is_dir() => {
-                        let file = get_str(&self.config, "file").unwrap_or_default();
-                        let file = (!file.is_empty())
-                            .then(|| Path::new(&file))
-                            .filter(|p| p.exists());
-                        self.playlist_visible = true;
-                        self.player.open_folder(&*self.mpv, Path::new(target), file);
-                        self.mpv.set_pause(true);
-                    }
-                    _ => {}
+        let opened = open_last
+            .then(|| self.config.get("opened").and_then(Value::as_array))
+            .flatten();
+        if let Some(opened) = opened {
+            let kind = opened.first().and_then(Value::as_str).unwrap_or("");
+            let target = opened.get(1).and_then(Value::as_str).unwrap_or("");
+            match kind {
+                "file" if Path::new(target).exists() => {
+                    self.player.open_file(&*self.mpv, Path::new(target));
+                    self.mpv.set_pause(true);
                 }
-                if position >= MIN_RESTORE_POSITION {
-                    self.mpv.set_time_pos(position);
+                "url" if !target.is_empty() => {
+                    self.player.open_url(&*self.mpv, target);
+                    self.mpv.set_pause(true);
                 }
+                "folder" if Path::new(target).is_dir() => {
+                    let file = get_str(&self.config, "file").unwrap_or_default();
+                    let file = (!file.is_empty())
+                        .then(|| Path::new(&file))
+                        .filter(|p| p.exists());
+                    self.playlist_visible = true;
+                    self.player.open_folder(&*self.mpv, Path::new(target), file);
+                    self.mpv.set_pause(true);
+                }
+                _ => {}
+            }
+            if position >= MIN_RESTORE_POSITION {
+                self.mpv.set_time_pos(position);
             }
         }
         self.apply_runtime_settings();
@@ -902,10 +904,11 @@ impl Anime4KPlayerApp {
     /// values instead of flickering the UI.
     fn poll_mpv(&mut self) {
         let now = Instant::now();
-        if let Some(last) = self.last_poll {
-            if now.duration_since(last) < Duration::from_millis(100) {
-                return;
-            }
+        if self
+            .last_poll
+            .is_some_and(|last| now.duration_since(last) < Duration::from_millis(100))
+        {
+            return;
         }
         self.last_poll = Some(now);
         if self.player.current.is_none() {
@@ -951,12 +954,14 @@ impl Anime4KPlayerApp {
         if self.pending_preset.is_none() || self.snap.duration.is_none() {
             return;
         }
-        if let Some(choice) = self.pending_preset.take() {
-            if !self.apply_choice(&choice) {
-                // Stale stored data: fall back to offering a choice.
-                if get_bool(&self.config, "askPresetOnOpen", true) {
-                    self.show_preset_offer = true;
-                }
+        if self
+            .pending_preset
+            .take()
+            .is_some_and(|choice| !self.apply_choice(&choice))
+        {
+            // Stale stored data: fall back to offering a choice.
+            if get_bool(&self.config, "askPresetOnOpen", true) {
+                self.show_preset_offer = true;
             }
         }
     }
@@ -1626,10 +1631,13 @@ impl Anime4KPlayerApp {
                         *path_field = text.trim().to_string();
                     }
                 }
-                if ui.button(choose_file).clicked() {
-                    if let Some(picked) = pick_sidecar_file(&kind) {
-                        *path_field = picked.to_string_lossy().into_owned();
-                    }
+                let picked = ui
+                    .button(choose_file)
+                    .clicked()
+                    .then(|| pick_sidecar_file(&kind))
+                    .flatten();
+                if let Some(picked) = picked {
+                    *path_field = picked.to_string_lossy().into_owned();
                 }
                 let path = path_field.trim().to_string();
                 if ui.button(select).clicked() && !path.is_empty() {
@@ -1686,10 +1694,13 @@ impl Anime4KPlayerApp {
             // is still loading resets progress forever (flickering play
             // button, video never starts), so replay only when truly idle
             // and just unpause otherwise.
-            if self.mpv.is_idle() {
-                if let Some(file) = self.player.current_file().cloned() {
-                    self.mpv.play(&file.to_string_lossy());
-                }
+            let replay = self
+                .mpv
+                .is_idle()
+                .then(|| self.player.current_file().cloned())
+                .flatten();
+            if let Some(file) = replay {
+                self.mpv.play(&file.to_string_lossy());
             }
             self.mpv.set_pause(false);
             self.snap.pause = false;
@@ -1803,7 +1814,11 @@ impl Anime4KPlayerApp {
                             Lang::Auto.config_value(),
                         );
                         for lang in Lang::all() {
-                            ui.selectable_value(&mut self.settings_lang, *lang, lang.config_value());
+                            ui.selectable_value(
+                                &mut self.settings_lang,
+                                *lang,
+                                lang.config_value(),
+                            );
                         }
                     });
                 ui.checkbox(&mut self.settings_open_last, open_last_label);
@@ -2277,11 +2292,9 @@ impl Anime4KPlayerApp {
                         self.config.set("linksHistory", json!(Vec::<String>::new()));
                     }
                 });
-                for link in &history {
-                    if let Some(link) = link.as_str() {
-                        if ui.link(link).clicked() {
-                            self.url_text = link.to_string();
-                        }
+                for link in history.iter().filter_map(|v| v.as_str()) {
+                    if ui.link(link).clicked() {
+                        self.url_text = link.to_string();
                     }
                 }
                 ui.horizontal(|ui| {
@@ -2337,10 +2350,13 @@ impl Anime4KPlayerApp {
                 ui.label(prompt);
                 ui.text_edit_singleline(&mut self.folder_text);
                 ui.horizontal(|ui| {
-                    if ui.button(self.t("Select")).clicked() {
-                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                            self.folder_text = dir.to_string_lossy().into_owned();
-                        }
+                    let dir = ui
+                        .button(self.t("Select"))
+                        .clicked()
+                        .then(|| rfd::FileDialog::new().pick_folder())
+                        .flatten();
+                    if let Some(dir) = dir {
+                        self.folder_text = dir.to_string_lossy().into_owned();
                     }
                     if ui.button(paste).clicked() {
                         let text = read_clipboard_text();
@@ -2353,11 +2369,9 @@ impl Anime4KPlayerApp {
                             .set("foldersHistory", json!(Vec::<String>::new()));
                     }
                 });
-                for folder in &history {
-                    if let Some(folder) = folder.as_str() {
-                        if ui.link(folder).clicked() {
-                            self.folder_text = folder.to_string();
-                        }
+                for folder in history.iter().filter_map(|v| v.as_str()) {
+                    if ui.link(folder).clicked() {
+                        self.folder_text = folder.to_string();
                     }
                 }
                 ui.horizontal(|ui| {
@@ -2411,10 +2425,13 @@ impl Anime4KPlayerApp {
                 ui.label(prompt);
                 ui.text_edit_singleline(&mut self.screenshot_dir_text);
                 ui.horizontal(|ui| {
-                    if ui.button(self.t("Select")).clicked() {
-                        if let Some(dir) = rfd::FileDialog::new().pick_folder() {
-                            self.screenshot_dir_text = dir.to_string_lossy().into_owned();
-                        }
+                    let dir = ui
+                        .button(self.t("Select"))
+                        .clicked()
+                        .then(|| rfd::FileDialog::new().pick_folder())
+                        .flatten();
+                    if let Some(dir) = dir {
+                        self.screenshot_dir_text = dir.to_string_lossy().into_owned();
                     }
                     if ui.button(paste).clicked() {
                         let text = read_clipboard_text();

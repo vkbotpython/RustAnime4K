@@ -329,11 +329,12 @@ impl LibMpv {
             // The GUI build has no console (windows_subsystem), so without
             // this file stutter causes are invisible. Overwritten every
             // start; a failed write must not fail init.
-            if let Ok(exe) = std::env::current_exe() {
-                if let Some(dir) = exe.parent() {
-                    let log_value = dir.join("mpv.log").to_string_lossy().into_owned();
-                    let _ = init.set_option("log-file", log_value.as_str());
-                }
+            let log_dir = std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(|p| p.to_path_buf()));
+            if let Some(dir) = log_dir {
+                let log_value = dir.join("mpv.log").to_string_lossy().into_owned();
+                let _ = init.set_option("log-file", log_value.as_str());
             }
             // Non-blocking render(): with the default timing offset render()
             // sleeps until the target display time, and since it runs on the

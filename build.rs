@@ -18,6 +18,8 @@ fn main() {
     );
     res.set("CompanyName", "avencores");
     if let Err(err) = res.compile() {
-        panic!("winres: failed to embed the app icon ({err:#}). Install the Windows SDK (rc.exe) or MinGW (windres).");
+        panic!(
+            "winres: failed to embed the app icon ({err:#}). Install the Windows SDK (rc.exe) or MinGW (windres)."
+        );
     }
 }
