@@ -6,6 +6,8 @@ use crate::i18n::{self, Lang};
 use crate::theme::{ColorScheme, Palette};
 use serde_json::{Value, json};
 
+use super::ui_kit::{bottom_bar, card, field_title, hint};
+
 impl Anime4KPlayerApp {
     /// Copies saved config into the settings drafts and opens the dialog.
     pub(crate) fn open_settings(&mut self) {
@@ -61,97 +63,147 @@ impl Anime4KPlayerApp {
         let scheme_system = self.t("System");
         let scheme_dark = self.t("Dark");
         let scheme_light = self.t("Light");
+        let russian = self.lang == Lang::Russian;
         let mut open = self.show_settings;
         let mut save = false;
         let mut cancel = false;
         egui::Window::new(title)
             .open(&mut open)
             .resizable(false)
-            .min_width(300.0)
+            .collapsible(false)
+            .min_width(420.0)
             .show(ctx, |ui| {
-                ui.label(language_label);
-                egui::ComboBox::from_id_salt("lang")
-                    .selected_text(self.settings_lang.config_value())
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(
-                            &mut self.settings_lang,
-                            Lang::Auto,
-                            Lang::Auto.config_value(),
-                        );
-                        for lang in Lang::all() {
+                // --- язык и запуск ---
+                card(ui, |ui| {
+                    field_title(
+                        ui,
+                        if russian {
+                            "Язык и запуск"
+                        } else {
+                            "Language & startup"
+                        },
+                    );
+                    egui::ComboBox::from_id_salt("lang")
+                        .selected_text(self.settings_lang.config_value())
+                        .show_ui(ui, |ui| {
                             ui.selectable_value(
                                 &mut self.settings_lang,
-                                *lang,
-                                lang.config_value(),
+                                Lang::Auto,
+                                Lang::Auto.config_value(),
                             );
-                        }
+                            for lang in Lang::all() {
+                                ui.selectable_value(
+                                    &mut self.settings_lang,
+                                    *lang,
+                                    lang.config_value(),
+                                );
+                            }
+                        });
+                    ui.add_space(2.0);
+                    hint(ui, &language_label);
+                    ui.add_space(4.0);
+                    ui.checkbox(&mut self.settings_open_last, open_last_label);
+                    ui.checkbox(&mut self.settings_pos_last, pos_last_label);
+                });
+                // --- воспроизведение ---
+                card(ui, |ui| {
+                    field_title(
+                        ui,
+                        if russian {
+                            "Воспроизведение"
+                        } else {
+                            "Playback"
+                        },
+                    );
+                    ui.checkbox(&mut self.settings_volume_plus, volume_plus_label);
+                    ui.checkbox(&mut self.settings_svp, svp_label);
+                    ui.checkbox(&mut self.settings_fixed_panel, fixed_label);
+                    ui.checkbox(&mut self.settings_ask_preset, ask_preset_label);
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.label(offset_label);
+                        // Sound offset: -100..100 s, step 0.01.
+                        ui.add(
+                            egui::DragValue::new(&mut self.settings_sound_offset)
+                                .speed(0.01)
+                                .range(-100.0..=100.0)
+                                .suffix(" s"),
+                        );
                     });
-                ui.checkbox(&mut self.settings_open_last, open_last_label);
-                ui.checkbox(&mut self.settings_pos_last, pos_last_label);
-                ui.checkbox(&mut self.settings_volume_plus, volume_plus_label);
-                ui.checkbox(&mut self.settings_svp, svp_label);
-                ui.checkbox(&mut self.settings_fixed_panel, fixed_label);
-                ui.checkbox(&mut self.settings_ask_preset, ask_preset_label);
-                ui.horizontal(|ui| {
-                    ui.label(offset_label);
-                    // Sound offset: -100..100 s, step 0.01.
-                    ui.add(
-                        egui::DragValue::new(&mut self.settings_sound_offset)
-                            .speed(0.01)
-                            .range(-100.0..=100.0),
+                    hint(
+                        ui,
+                        if russian {
+                            "Сдвиг звука: −100…100 с, шаг 0.01."
+                        } else {
+                            "Audio shift: −100…100 s, step 0.01."
+                        },
                     );
                 });
-                ui.horizontal(|ui| {
-                    ui.label(palette_label);
-                    egui::ComboBox::from_id_salt("palette")
-                        .selected_text(self.settings_palette.name())
-                        .show_ui(ui, |ui| {
-                            for name in Palette::all_names() {
-                                ui.selectable_value(
-                                    &mut self.settings_palette,
-                                    Palette::from_name(name),
-                                    *name,
-                                );
-                            }
+                // --- оформление ---
+                card(ui, |ui| {
+                    field_title(
+                        ui,
+                        if russian {
+                            "Оформление"
+                        } else {
+                            "Appearance"
+                        },
+                    );
+                    egui::Grid::new("settings_appearance")
+                        .num_columns(2)
+                        .spacing([12.0, 6.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label(palette_label);
+                            egui::ComboBox::from_id_salt("palette")
+                                .selected_text(self.settings_palette.name())
+                                .show_ui(ui, |ui| {
+                                    for name in Palette::all_names() {
+                                        ui.selectable_value(
+                                            &mut self.settings_palette,
+                                            Palette::from_name(name),
+                                            *name,
+                                        );
+                                    }
+                                });
+                            ui.end_row();
+                            ui.label(scheme_label);
+                            egui::ComboBox::from_id_salt("scheme")
+                                .selected_text(self.settings_scheme.name())
+                                .show_ui(ui, |ui| {
+                                    ui.selectable_value(
+                                        &mut self.settings_scheme,
+                                        ColorScheme::System,
+                                        scheme_system.as_str(),
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.settings_scheme,
+                                        ColorScheme::Dark,
+                                        scheme_dark.as_str(),
+                                    );
+                                    ui.selectable_value(
+                                        &mut self.settings_scheme,
+                                        ColorScheme::Light,
+                                        scheme_light.as_str(),
+                                    );
+                                });
+                            ui.end_row();
+                            ui.label(style_label);
+                            egui::ComboBox::from_id_salt("qstyle")
+                                .selected_text(self.settings_style.clone())
+                                .show_ui(ui, |ui| {
+                                    for name in crate::theme::style::all_names() {
+                                        ui.selectable_value(
+                                            &mut self.settings_style,
+                                            (*name).to_string(),
+                                            *name,
+                                        );
+                                    }
+                                });
+                            ui.end_row();
                         });
                 });
-                ui.horizontal(|ui| {
-                    ui.label(scheme_label);
-                    egui::ComboBox::from_id_salt("scheme")
-                        .selected_text(self.settings_scheme.name())
-                        .show_ui(ui, |ui| {
-                            ui.selectable_value(
-                                &mut self.settings_scheme,
-                                ColorScheme::System,
-                                scheme_system.as_str(),
-                            );
-                            ui.selectable_value(
-                                &mut self.settings_scheme,
-                                ColorScheme::Dark,
-                                scheme_dark.as_str(),
-                            );
-                            ui.selectable_value(
-                                &mut self.settings_scheme,
-                                ColorScheme::Light,
-                                scheme_light.as_str(),
-                            );
-                        });
-                });
-                ui.horizontal(|ui| {
-                    ui.label(style_label);
-                    egui::ComboBox::from_id_salt("qstyle")
-                        .selected_text(self.settings_style.clone())
-                        .show_ui(ui, |ui| {
-                            for name in crate::theme::style::all_names() {
-                                ui.selectable_value(
-                                    &mut self.settings_style,
-                                    (*name).to_string(),
-                                    *name,
-                                );
-                            }
-                        });
-                });
-                ui.horizontal(|ui| {
+                bottom_bar(ui, |ui| {
                     if ui.button(save_label).clicked() {
                         save = true;
                     }

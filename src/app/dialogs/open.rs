@@ -2,8 +2,11 @@
 
 use crate::app::helpers::read_clipboard_text;
 use crate::app::state::Anime4KPlayerApp;
+use crate::i18n::Lang;
 use serde_json::{Value, json};
 use std::path::Path;
+
+use super::ui_kit::{bottom_bar, card, field_title, hint, text_field};
 
 impl Anime4KPlayerApp {
     pub(crate) fn open_url_dialog(&mut self, ctx: &egui::Context) {
@@ -16,6 +19,7 @@ impl Anime4KPlayerApp {
         let paste = self.t("Paste");
         let go = self.t("Select");
         let cancel = self.t("Cancel");
+        let russian = self.lang == Lang::Russian;
         let mut open = self.show_open_url;
         let mut chosen: Option<String> = None;
         let mut cancelled = false;
@@ -27,28 +31,55 @@ impl Anime4KPlayerApp {
         egui::Window::new(title)
             .open(&mut open)
             .resizable(false)
-            .min_width(480.0)
+            .collapsible(false)
+            .min_width(500.0)
             .show(ctx, |ui| {
-                ui.label(prompt);
-                ui.text_edit_singleline(&mut self.url_text);
-                ui.horizontal(|ui| {
-                    if ui.button(paste).clicked() {
-                        let text = read_clipboard_text();
-                        if !text.trim().is_empty() {
-                            self.url_text = text.trim().to_string();
+                card(ui, |ui| {
+                    field_title(ui, &prompt);
+                    text_field(ui, &mut self.url_text, "https://…");
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button(paste).clicked() {
+                            let text = read_clipboard_text();
+                            if !text.trim().is_empty() {
+                                self.url_text = text.trim().to_string();
+                            }
                         }
-                    }
-                    if ui.button(clear).clicked() {
-                        self.config.set("linksHistory", json!(Vec::<String>::new()));
-                        self.flush_config();
-                    }
+                        if ui.button(clear).clicked() {
+                            self.config.set("linksHistory", json!(Vec::<String>::new()));
+                            self.flush_config();
+                        }
+                    });
+                    hint(
+                        ui,
+                        if russian {
+                            "Вставьте ссылку или выберите из истории ниже."
+                        } else {
+                            "Paste a link or pick one from the history below."
+                        },
+                    );
                 });
-                for link in history.iter().filter_map(|v| v.as_str()) {
-                    if ui.link(link).clicked() {
-                        self.url_text = link.to_string();
-                    }
-                }
-                ui.horizontal(|ui| {
+                card(ui, |ui| {
+                    field_title(
+                        ui,
+                        if russian {
+                            "Недавние ссылки"
+                        } else {
+                            "Recent links"
+                        },
+                    );
+                    Self::history_list(
+                        ui,
+                        history.iter().filter_map(|v| v.as_str()),
+                        if russian {
+                            "Пока пусто"
+                        } else {
+                            "Empty so far"
+                        },
+                        &mut self.url_text,
+                    );
+                });
+                bottom_bar(ui, |ui| {
                     if ui.button(go).clicked() {
                         let link = self.url_text.trim().to_string();
                         if !link.is_empty() {
@@ -85,7 +116,9 @@ impl Anime4KPlayerApp {
         let paste = self.t("Paste");
         let go = self.t("Select");
         let cancel = self.t("Cancel");
+        let browse = self.t("Select");
         let err = self.t("Error");
+        let russian = self.lang == Lang::Russian;
         let mut open = self.show_open_folder;
         let mut chosen: Option<String> = None;
         let mut cancelled = false;
@@ -97,37 +130,72 @@ impl Anime4KPlayerApp {
         egui::Window::new(title)
             .open(&mut open)
             .resizable(false)
-            .min_width(480.0)
+            .collapsible(false)
+            .min_width(500.0)
             .show(ctx, |ui| {
-                ui.label(prompt);
-                ui.text_edit_singleline(&mut self.folder_text);
-                ui.horizontal(|ui| {
-                    let dir = ui
-                        .button(self.t("Select"))
-                        .clicked()
-                        .then(|| rfd::FileDialog::new().pick_folder())
-                        .flatten();
-                    if let Some(dir) = dir {
-                        self.folder_text = dir.to_string_lossy().into_owned();
-                    }
-                    if ui.button(paste).clicked() {
-                        let text = read_clipboard_text();
-                        if !text.trim().is_empty() {
-                            self.folder_text = text.trim().to_string();
+                card(ui, |ui| {
+                    field_title(ui, &prompt);
+                    text_field(
+                        ui,
+                        &mut self.folder_text,
+                        if russian {
+                            "Путь к папке с видео…"
+                        } else {
+                            "Path to a video folder…"
+                        },
+                    );
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        let dir = ui
+                            .button(browse)
+                            .clicked()
+                            .then(|| rfd::FileDialog::new().pick_folder())
+                            .flatten();
+                        if let Some(dir) = dir {
+                            self.folder_text = dir.to_string_lossy().into_owned();
                         }
-                    }
-                    if ui.button(clear).clicked() {
-                        self.config
-                            .set("foldersHistory", json!(Vec::<String>::new()));
-                        self.flush_config();
-                    }
+                        if ui.button(paste).clicked() {
+                            let text = read_clipboard_text();
+                            if !text.trim().is_empty() {
+                                self.folder_text = text.trim().to_string();
+                            }
+                        }
+                        if ui.button(clear).clicked() {
+                            self.config
+                                .set("foldersHistory", json!(Vec::<String>::new()));
+                            self.flush_config();
+                        }
+                    });
+                    hint(
+                        ui,
+                        if russian {
+                            "Укажите путь вручную, вставьте из буфера или выберите обзором."
+                        } else {
+                            "Type a path, paste it, or pick with the file browser."
+                        },
+                    );
                 });
-                for folder in history.iter().filter_map(|v| v.as_str()) {
-                    if ui.link(folder).clicked() {
-                        self.folder_text = folder.to_string();
-                    }
-                }
-                ui.horizontal(|ui| {
+                card(ui, |ui| {
+                    field_title(
+                        ui,
+                        if russian {
+                            "Недавние папки"
+                        } else {
+                            "Recent folders"
+                        },
+                    );
+                    Self::history_list(
+                        ui,
+                        history.iter().filter_map(|v| v.as_str()),
+                        if russian {
+                            "Пока пусто"
+                        } else {
+                            "Empty so far"
+                        },
+                        &mut self.folder_text,
+                    );
+                });
+                bottom_bar(ui, |ui| {
                     if ui.button(go).clicked() {
                         let folder = self.folder_text.trim().to_string();
                         if !folder.is_empty() {
@@ -157,5 +225,31 @@ impl Anime4KPlayerApp {
             }
             self.show_open_folder = false;
         }
+    }
+
+    /// История открытий: пустое состояние-подсказка либо прокручиваемый
+    /// список ссылок; клик подставляет значение в поле ввода.
+    fn history_list<'a>(
+        ui: &mut egui::Ui,
+        items: impl Iterator<Item = &'a str>,
+        empty_hint: &str,
+        target: &mut String,
+    ) {
+        let items: Vec<&str> = items.collect();
+        if items.is_empty() {
+            hint(ui, empty_hint);
+            return;
+        }
+        egui::ScrollArea::vertical()
+            .max_height(150.0)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                for item in items {
+                    if ui.link(item).clicked() {
+                        *target = item.to_string();
+                    }
+                }
+            });
     }
 }

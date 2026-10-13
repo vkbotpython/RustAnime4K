@@ -4,6 +4,8 @@ use crate::app::helpers::{get_str, parse_launch_params};
 use crate::app::state::Anime4KPlayerApp;
 use serde_json::json;
 
+use super::ui_kit::{card, hint, para};
+
 impl Anime4KPlayerApp {
     /// Copies saved launch parameters into the draft and opens the dialog.
     pub(crate) fn open_launch(&mut self) {
@@ -28,19 +30,21 @@ impl Anime4KPlayerApp {
         let mut applied_ok: Option<bool> = None;
         egui::Window::new(title)
             .open(&mut open)
-            .min_width(420.0)
+            .collapsible(false)
+            .min_width(440.0)
+            .default_size([540.0, 420.0])
             .show(ctx, |ui| {
-                ui.label(prompt);
-                ui.label("name=value");
+                card(ui, |ui| {
+                    para(ui, &prompt);
+                    ui.monospace("volume=50");
+                    hint(ui, "name=value");
+                });
                 // Buttons pinned to the bottom, editor fills the rest with
                 // an explicit size: a fixed-rows TextEdit lets the window
                 // snap back to content height, making vertical resize
                 // impossible. Filling the allocation keeps dragged height.
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.horizontal(|ui| {
-                        if ui.button(save_label).clicked() {
-                            saved = true;
-                        }
                         if ui.button(apply_label).clicked() {
                             let mut ok = true;
                             for (name, value) in
@@ -59,6 +63,9 @@ impl Anime4KPlayerApp {
                             saved = true;
                             applied_ok = Some(ok);
                         }
+                        if ui.button(save_label).clicked() {
+                            saved = true;
+                        }
                         if ui.button(cancel_label).clicked() {
                             // Discard the draft on Cancel.
                             cancelled = true;
@@ -67,7 +74,9 @@ impl Anime4KPlayerApp {
                     let avail = ui.available_size();
                     ui.add_sized(
                         egui::vec2(avail.x, avail.y.max(120.0)),
-                        egui::TextEdit::multiline(&mut self.launch_params_text),
+                        egui::TextEdit::multiline(&mut self.launch_params_text)
+                            .font(egui::TextStyle::Monospace)
+                            .hint_text("name=value"),
                     );
                 });
             });

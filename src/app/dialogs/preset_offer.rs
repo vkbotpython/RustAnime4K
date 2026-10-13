@@ -3,7 +3,11 @@
 use crate::anime4k;
 use crate::app::helpers::display_name_of;
 use crate::app::state::Anime4KPlayerApp;
+use crate::i18n::Lang;
 use serde_json::json;
+
+use super::ui_kit::{badge, bottom_bar, card, field_title, hint, mode_color};
+use egui::RichText;
 
 impl Anime4KPlayerApp {
     /// Offered when a video starts and the file has no saved preset:
@@ -24,6 +28,7 @@ impl Anime4KPlayerApp {
         let apply_label = self.t("Apply");
         let disable_label = self.t("Disable");
         let dont_ask_label = self.t("Don't ask again");
+        let russian = self.lang == Lang::Russian;
         let name = display_name_of(&current.to_string_lossy());
 
         // Modes depend on the selected quality (standard 6 vs HQ list).
@@ -53,50 +58,85 @@ impl Anime4KPlayerApp {
         egui::Window::new(title)
             .open(&mut open)
             .resizable(false)
-            .min_width(380.0)
+            .collapsible(false)
+            .min_width(400.0)
             .show(ctx, |ui| {
-                ui.monospace(&name);
-                ui.horizontal(|ui| {
-                    ui.label(quality_label);
-                    egui::ComboBox::from_id_salt("offer-quality")
-                        .selected_text(self.preset_offer_quality.clone())
-                        .show_ui(ui, |ui| {
-                            for quality in anime4k::QUALITIES
-                                .iter()
-                                .map(|s| s.to_string())
-                                .chain(std::iter::once("HQ".to_string()))
-                            {
-                                ui.selectable_value(
-                                    &mut self.preset_offer_quality,
-                                    quality.clone(),
-                                    quality,
-                                );
-                            }
-                        });
-                    ui.label(mode_label);
-                    egui::ComboBox::from_id_salt("offer-mode")
-                        .selected_text(self.preset_offer_mode.clone())
-                        .show_ui(ui, |ui| {
-                            if is_hq {
-                                for mode in &hq_names {
-                                    ui.selectable_value(
-                                        &mut self.preset_offer_mode,
-                                        mode.clone(),
-                                        mode,
-                                    );
-                                }
-                            } else {
-                                for mode in anime4k::MODES {
-                                    ui.selectable_value(
-                                        &mut self.preset_offer_mode,
-                                        (*mode).to_string(),
-                                        *mode,
-                                    );
-                                }
-                            }
-                        });
+                card(ui, |ui| {
+                    ui.monospace(&name);
+                    ui.add_space(2.0);
+                    hint(
+                        ui,
+                        if russian {
+                            "Выбор запомнится для этого файла."
+                        } else {
+                            "The choice is remembered for this file."
+                        },
+                    );
                 });
-                ui.horizontal(|ui| {
+                card(ui, |ui| {
+                    field_title(ui, if russian { "Пресет" } else { "Preset" });
+                    egui::Grid::new("offer-preset")
+                        .num_columns(2)
+                        .spacing([12.0, 6.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label(quality_label);
+                            egui::ComboBox::from_id_salt("offer-quality")
+                                .selected_text(self.preset_offer_quality.clone())
+                                .show_ui(ui, |ui| {
+                                    for quality in anime4k::QUALITIES
+                                        .iter()
+                                        .map(|s| s.to_string())
+                                        .chain(std::iter::once("HQ".to_string()))
+                                    {
+                                        ui.selectable_value(
+                                            &mut self.preset_offer_quality,
+                                            quality.clone(),
+                                            quality,
+                                        );
+                                    }
+                                });
+                            ui.end_row();
+                            ui.label(mode_label);
+                            egui::ComboBox::from_id_salt("offer-mode")
+                                .selected_text(self.preset_offer_mode.clone())
+                                .show_ui(ui, |ui| {
+                                    if is_hq {
+                                        for mode in &hq_names {
+                                            ui.selectable_value(
+                                                &mut self.preset_offer_mode,
+                                                mode.clone(),
+                                                mode,
+                                            );
+                                        }
+                                    } else {
+                                        for mode in anime4k::MODES {
+                                            ui.selectable_value(
+                                                &mut self.preset_offer_mode,
+                                                (*mode).to_string(),
+                                                *mode,
+                                            );
+                                        }
+                                    }
+                                });
+                            ui.end_row();
+                        });
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(badge(
+                            &self.preset_offer_mode,
+                            mode_color(&self.preset_offer_mode),
+                        ));
+                        ui.label(
+                            RichText::new(&self.preset_offer_quality)
+                                .strong()
+                                .size(13.0)
+                                .color(ui.visuals().weak_text_color()),
+                        );
+                    });
+                });
+                ui.checkbox(&mut self.preset_offer_dont_ask, dont_ask_label);
+                bottom_bar(ui, |ui| {
                     if ui.button(apply_label).clicked() {
                         applied = true;
                     }
@@ -104,7 +144,6 @@ impl Anime4KPlayerApp {
                         disabled = true;
                     }
                 });
-                ui.checkbox(&mut self.preset_offer_dont_ask, dont_ask_label);
             });
         if applied {
             if is_hq {

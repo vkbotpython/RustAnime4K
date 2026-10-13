@@ -5,6 +5,8 @@ use crate::app::state::{APP_NAME, DONATE_CARD_PLAIN, DONATE_CARD_SPACED, VERSION
 use crate::i18n::Lang;
 use std::time::{Duration, Instant};
 
+use super::ui_kit::card;
+
 impl Anime4KPlayerApp {
     pub(crate) fn about_dialog(&mut self, ctx: &egui::Context) {
         if !self.show_about {
@@ -26,6 +28,7 @@ impl Anime4KPlayerApp {
         egui::Window::new(title)
             .open(&mut open)
             .resizable(false)
+            .collapsible(false)
             .min_width(460.0)
             .show(ctx, |ui| {
                 // --- шапка: иконка, название, версия, слоган ---
@@ -105,89 +108,72 @@ impl Anime4KPlayerApp {
                     });
                 ui.add_space(6.0);
                 // --- связь и исходный код ---
-                egui::Frame::new()
-                    .fill(ui.visuals().faint_bg_color)
-                    .inner_margin(10.0)
-                    .corner_radius(8.0)
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        ui.visuals().widgets.noninteractive.bg_stroke.color,
-                    ))
-                    .show(ui, |ui| {
-                        ui.label(
-                            egui::RichText::new(if russian {
-                                "Связь и исходный код"
-                            } else {
-                                "Contact & source"
-                            })
-                            .strong()
-                            .size(13.0),
-                        );
-                        ui.horizontal(|ui| {
-                            ui.label("YouTube:");
-                            ui.hyperlink("https://www.youtube.com/@avencores/");
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("Telegram:");
-                            ui.hyperlink("https://t.me/avencoresyt");
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("VK:");
-                            ui.hyperlink("https://vk.ru/avencoresreuploads");
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label(if russian { "Дзен:" } else { "Dzen:" });
-                            ui.hyperlink("https://dzen.ru/avencores");
-                        });
-                        ui.horizontal(|ui| {
-                            ui.label("GitHub:");
-                            ui.hyperlink("https://github.com/vkbotpython/RustAnime4K");
-                        });
+                card(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(if russian {
+                            "Связь и исходный код"
+                        } else {
+                            "Contact & source"
+                        })
+                        .strong()
+                        .size(13.0),
+                    );
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("YouTube:");
+                        ui.hyperlink("https://www.youtube.com/@avencores/");
                     });
-                ui.add_space(6.0);
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Telegram:");
+                        ui.hyperlink("https://t.me/avencoresyt");
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("VK:");
+                        ui.hyperlink("https://vk.ru/avencoresreuploads");
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(if russian { "Дзен:" } else { "Dzen:" });
+                        ui.hyperlink("https://dzen.ru/avencores");
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("GitHub:");
+                        ui.hyperlink("https://github.com/vkbotpython/RustAnime4K");
+                    });
+                });
                 // --- донат ---
-                egui::Frame::new()
-                    .fill(ui.visuals().faint_bg_color)
-                    .inner_margin(10.0)
-                    .corner_radius(8.0)
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        ui.visuals().widgets.noninteractive.bg_stroke.color,
-                    ))
-                    .show(ui, |ui| {
+                card(ui, |ui| {
+                    ui.label(
+                        egui::RichText::new(if russian {
+                            "Поддержать автора"
+                        } else {
+                            "Support the author"
+                        })
+                        .strong()
+                        .size(13.0),
+                    );
+                    ui.horizontal_wrapped(|ui| {
                         ui.label(
-                            egui::RichText::new(if russian {
-                                "Поддержать автора"
-                            } else {
-                                "Support the author"
-                            })
-                            .strong()
-                            .size(13.0),
+                            egui::RichText::new(" SBER ")
+                                .strong()
+                                .size(12.5)
+                                .color(egui::Color32::WHITE)
+                                .background_color(egui::Color32::from_rgb(46, 125, 50)),
                         );
-                        ui.horizontal(|ui| {
+                        ui.monospace(DONATE_CARD_SPACED);
+                        if ui.button(copy_label).clicked() {
+                            // Bank apps paste card numbers without spaces.
+                            ui.ctx().copy_text(DONATE_CARD_PLAIN.to_string());
+                            self.about_copied_at = Some(Instant::now());
+                        }
+                        if copied {
                             ui.label(
-                                egui::RichText::new(" SBER ")
+                                egui::RichText::new(copied_label)
                                     .strong()
                                     .size(12.5)
-                                    .color(egui::Color32::WHITE)
-                                    .background_color(egui::Color32::from_rgb(46, 125, 50)),
+                                    .color(egui::Color32::from_rgb(46, 125, 50)),
                             );
-                            ui.monospace(DONATE_CARD_SPACED);
-                            if ui.button(copy_label).clicked() {
-                                // Bank apps paste card numbers without spaces.
-                                ui.ctx().copy_text(DONATE_CARD_PLAIN.to_string());
-                                self.about_copied_at = Some(Instant::now());
-                            }
-                            if copied {
-                                ui.label(
-                                    egui::RichText::new(copied_label)
-                                        .strong()
-                                        .size(12.5)
-                                        .color(egui::Color32::from_rgb(46, 125, 50)),
-                                );
-                            }
-                        });
+                        }
                     });
+                });
             });
         self.show_about = open;
     }

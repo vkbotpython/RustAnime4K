@@ -10,6 +10,7 @@ mod open;
 mod preset_offer;
 mod screenshot;
 mod settings;
+mod ui_kit;
 
 impl Anime4KPlayerApp {
     pub(crate) fn dialogs(&mut self, ctx: &egui::Context) {

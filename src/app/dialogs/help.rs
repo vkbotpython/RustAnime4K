@@ -16,6 +16,7 @@ impl Anime4KPlayerApp {
             .default_size([680.0, 560.0])
             .min_width(540.0)
             .resizable(true)
+            .collapsible(false)
             .show(ctx, |ui| {
                 egui::ScrollArea::vertical()
                     .auto_shrink([false; 2])
