@@ -32,6 +32,10 @@ const FULLSCREEN_BOTTOM_ZONE: f32 = 140.0;
 /// Right strip (px) that reveals the playlist in fullscreen.
 const FULLSCREEN_RIGHT_ZONE: f32 = 120.0;
 
+/// How long a transient `status` line (screenshot name, errors, "Success")
+/// stays in the video corner before auto-clearing.
+const STATUS_TTL: Duration = Duration::from_secs(4);
+
 const SPEEDS: &[f64] = &[
     0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0,
 ];
@@ -184,6 +188,9 @@ pub struct Anime4KPlayerApp {
     player: PlayerState,
     playlist_visible: bool,
     status: String,
+    /// When the current `status` line expires (see `set_status`).
+    /// `None` = no transient message to clear.
+    status_until: Option<Instant>,
 
     // Dialog visibility + drafts.
     show_settings: bool,
@@ -329,6 +336,7 @@ impl Anime4KPlayerApp {
             video,
             playlist_visible: false,
             status: String::new(),
+            status_until: None,
             show_settings: false,
             show_about: false,
             show_open_url: false,
@@ -344,9 +352,10 @@ impl Anime4KPlayerApp {
             folder_text: String::new(),
             add_audio_path: String::new(),
             add_sub_path: String::new(),
-            screenshot_dir_text: String::new(),
+            screenshot_dir_text: get_str(&config, "screenshotDirectory").unwrap_or_default(),
             launch_params_text: get_str(&config, "launchParameters").unwrap_or_default(),
-            android_path: "/storage/emulated/0/mpv/shaders/".to_string(),
+            android_path: get_str(&config, "androidPath")
+                .unwrap_or_else(|| "/storage/emulated/0/mpv/shaders/".to_string()),
             android_index: 0,
             settings_lang: Lang::from_config_value(get_str(&config, "language").as_deref()),
             settings_open_last: get_bool(&config, "onOpenLastFile", true),
@@ -398,6 +407,35 @@ impl Anime4KPlayerApp {
 
     fn t(&self, key: &str) -> String {
         i18n::t(self.lang, key)
+    }
+
+    /// Transient video-corner message: shown for `STATUS_TTL`, then
+    /// auto-cleared by `expire_status` (called every frame in `ui()`).
+    fn set_status(&mut self, msg: String) {
+        if msg.is_empty() {
+            self.status.clear();
+            self.status_until = None;
+        } else {
+            self.status = msg;
+            self.status_until = Some(Instant::now() + STATUS_TTL);
+        }
+    }
+
+    /// Drops an expired transient message (see `set_status`).
+    fn expire_status(&mut self) {
+        if matches!(self.status_until, Some(t) if Instant::now() >= t) {
+            self.status.clear();
+            self.status_until = None;
+        }
+    }
+
+    /// Flushes in-memory config to disk right away (explicit user action —
+    /// a crash/exit must not lose it). High-frequency updates (volume drag,
+    /// playback position) still rely on the exit save instead.
+    fn flush_config(&self) {
+        if let Err(err) = self.config.save() {
+            eprintln!("cannot save config: {err:#}");
+        }
     }
 
     fn apply_theme(&self, ctx: &egui::Context) {
@@ -655,11 +693,13 @@ impl Anime4KPlayerApp {
         if pressed(Key::ArrowUp, Modifiers::NONE) {
             self.player.volume_up(&*self.mpv);
             self.config.set("volume", json!(self.player.volume));
+            self.flush_config();
             return;
         }
         if pressed(Key::ArrowDown, Modifiers::NONE) {
             self.player.volume_down(&*self.mpv);
             self.config.set("volume", json!(self.player.volume));
+            self.flush_config();
             return;
         }
         if pressed(Key::Plus, Modifiers::NONE)
@@ -774,6 +814,12 @@ impl Anime4KPlayerApp {
         for (name, value) in parse_launch_params(&params) {
             self.mpv.set_option_str(&name, &value);
         }
+        // Remembered screenshot folder (see `screenshot_dialog`): re-point
+        // mpv so F12 shots land there without reopening the dialog.
+        let shot_dir = get_str(&self.config, "screenshotDirectory").unwrap_or_default();
+        if !shot_dir.trim().is_empty() {
+            let _ = self.mpv.set_screenshot_directory(shot_dir.trim());
+        }
     }
 
     fn save_on_exit(&mut self) {
@@ -790,6 +836,16 @@ impl Anime4KPlayerApp {
             }
             _ => self.config.set("position", Value::Null),
         }
+        // Dialog drafts that have no explicit Save (or were typed but never
+        // saved) must survive a restart too: sync them before writing.
+        self.config.set(
+            "screenshotDirectory",
+            json!(self.screenshot_dir_text.trim()),
+        );
+        self.config
+            .set("androidPath", json!(self.android_path.clone()));
+        self.config
+            .set("launchParameters", json!(self.launch_params_text.clone()));
         if let Err(err) = self.config.save() {
             eprintln!("cannot save config: {err:#}");
         }
@@ -797,6 +853,7 @@ impl Anime4KPlayerApp {
 
     fn set_opened(&mut self, kind: &str, target: &str) {
         self.config.set("opened", json!([kind, target]));
+        self.flush_config();
     }
 
     /// Storage key for the current file (full path or URL), if any.
@@ -822,6 +879,7 @@ impl Anime4KPlayerApp {
             .unwrap_or_default();
         map.insert(key.to_string(), choice.to_json());
         self.config.set("filePresets", Value::Object(map));
+        self.flush_config();
     }
 
     /// Applies a stored choice without re-saving it.
@@ -872,12 +930,12 @@ impl Anime4KPlayerApp {
         if missing.is_empty() {
             return Some(anime4k::preset_to_glsl_shaders(&dir, preset));
         }
-        self.status = format!(
+        self.set_status(format!(
             "{}: Anime4K shaders not found in {} (e.g. {})",
             self.t("Error"),
             dir.display(),
             missing.first().map(String::as_str).unwrap_or("*.glsl"),
-        );
+        ));
         None
     }
 
@@ -1043,6 +1101,7 @@ impl eframe::App for Anime4KPlayerApp {
         // so repaint storms (every video frame) cost zero mpv round-trips.
         self.poll_mpv();
         self.flush_pending_preset();
+        self.expire_status();
         // Per-frame repaints come from the render-context update callback
         // (see VideoRenderer::new): it fires exactly when mpv has a new
         // frame, so playback runs at video rate without a busy loop here.
@@ -1589,6 +1648,11 @@ impl Anime4KPlayerApp {
                     self.snap.volume = self.player.volume;
                     self.config.set("volume", json!(self.player.volume));
                 }
+                // Slider drags fire `changed()` every frame: flush once on
+                // release instead of writing config.json continuously.
+                if vol_resp.drag_stopped() {
+                    self.flush_config();
+                }
                 ui.monospace(format!("{}%", self.player.volume))
                     .on_hover_text(self.t("Volume level"));
             });
@@ -1812,7 +1876,7 @@ impl Anime4KPlayerApp {
                 }
                 self.pending_preset = Some(choice);
             }
-            Err(err) => self.status = format!("{}: {err:#}", self.t("Error")),
+            Err(err) => self.set_status(format!("{}: {err:#}", self.t("Error"))),
         }
     }
 
@@ -2025,6 +2089,7 @@ impl Anime4KPlayerApp {
         self.mpv.set_svp(self.settings_svp);
         self.apply_style(ctx);
         self.apply_theme(ctx);
+        self.flush_config();
     }
 
     fn about_dialog(&mut self, ctx: &egui::Context) {
@@ -2336,6 +2401,7 @@ impl Anime4KPlayerApp {
     fn finish_preset_offer(&mut self) {
         if self.preset_offer_dont_ask {
             self.config.set("askPresetOnOpen", json!(false));
+            self.flush_config();
         }
     }
 
@@ -2373,6 +2439,7 @@ impl Anime4KPlayerApp {
                     }
                     if ui.button(clear).clicked() {
                         self.config.set("linksHistory", json!(Vec::<String>::new()));
+                        self.flush_config();
                     }
                 });
                 for link in history.iter().filter_map(|v| v.as_str()) {
@@ -2388,6 +2455,7 @@ impl Anime4KPlayerApp {
                             updated.retain(|v| v.as_str() != Some(link.as_str()));
                             updated.insert(0, Value::String(link.clone()));
                             self.config.set("linksHistory", Value::Array(updated));
+                            self.flush_config();
                             chosen = Some(link);
                         }
                     }
@@ -2450,6 +2518,7 @@ impl Anime4KPlayerApp {
                     if ui.button(clear).clicked() {
                         self.config
                             .set("foldersHistory", json!(Vec::<String>::new()));
+                        self.flush_config();
                     }
                 });
                 for folder in history.iter().filter_map(|v| v.as_str()) {
@@ -2465,6 +2534,7 @@ impl Anime4KPlayerApp {
                             updated.retain(|v| v.as_str() != Some(folder.as_str()));
                             updated.insert(0, Value::String(folder.clone()));
                             self.config.set("foldersHistory", Value::Array(updated));
+                            self.flush_config();
                             chosen = Some(folder);
                         }
                     }
@@ -2482,7 +2552,7 @@ impl Anime4KPlayerApp {
             if path.is_dir() {
                 self.do_open_folder(ctx, path);
             } else {
-                self.status = format!("{err}: {folder}");
+                self.set_status(format!("{err}: {folder}"));
             }
             self.show_open_folder = false;
         }
@@ -2496,9 +2566,9 @@ impl Anime4KPlayerApp {
             return;
         };
         if let Some(name) = crate::mpv::find_new_file(&watch.before, &watch.dir) {
-            self.status = format!("{}: {name}", self.t("Screenshot"));
+            self.set_status(format!("{}: {name}", self.t("Screenshot")));
         } else if Instant::now() >= watch.deadline {
-            self.status = format!("{} (mpv.log)", self.t("Error"));
+            self.set_status(format!("{} (mpv.log)", self.t("Error")));
         } else {
             self.screenshot_pending = Some(watch);
         }
@@ -2549,6 +2619,8 @@ impl Anime4KPlayerApp {
                             eprintln!("screenshot directory failed: {e:#}");
                             failed = true;
                         } else {
+                            self.config.set("screenshotDirectory", json!(dir));
+                            self.flush_config();
                             done = true;
                         }
                     }
@@ -2569,6 +2641,8 @@ impl Anime4KPlayerApp {
                             .and_then(|()| self.mpv.screenshot());
                         match dispatched {
                             Ok(()) => {
+                                self.config.set("screenshotDirectory", json!(dir));
+                                self.flush_config();
                                 self.screenshot_pending = Some(ScreenshotWatch {
                                     dir: dir_path,
                                     before,
@@ -2584,7 +2658,7 @@ impl Anime4KPlayerApp {
                 }
             });
         if failed {
-            self.status = err;
+            self.set_status(err);
         }
         self.show_screenshot = open && !done;
     }
@@ -2656,10 +2730,11 @@ impl Anime4KPlayerApp {
         if saved {
             self.config
                 .set("launchParameters", json!(self.launch_params_text.clone()));
+            self.flush_config();
         }
         match applied_ok {
-            Some(true) => self.status = success,
-            Some(false) => self.status = err,
+            Some(true) => self.set_status(success),
+            Some(false) => self.set_status(err),
             None => {}
         }
         self.show_launch_params = open;
@@ -2734,6 +2809,13 @@ impl Anime4KPlayerApp {
                     ui.monospace(format!("# {selected_text}\n{single}"));
                 });
         });
+        // The path field has no Save button (actions only copy to the
+        // clipboard): remember it on close so it survives a restart.
+        if self.show_android && !open {
+            self.config
+                .set("androidPath", json!(self.android_path.clone()));
+            self.flush_config();
+        }
         self.show_android = open;
     }
 

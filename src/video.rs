@@ -111,7 +111,7 @@ impl VideoRenderer {
             return;
         }
 
-        let res = match self.ensure_resources(size) {
+        let (res, fresh) = match self.ensure_resources(size) {
             Ok(res) => res,
             Err(err) => {
                 let msg = format!("video framebuffer allocation failed: {err:#}");
@@ -122,7 +122,11 @@ impl VideoRenderer {
         };
 
         let flags = self.ctx.update().unwrap_or(0);
-        if flags & mpv_render_update::Frame != 0 {
+        // While paused mpv sends no new frames, but a fresh (just
+        // reallocated) framebuffer starts empty: opening the side panel
+        // resizes the rect, reallocates, and the paused picture would go
+        // black until the next frame. Re-render unconditionally then.
+        if fresh || (flags & mpv_render_update::Frame != 0) {
             match res.framebuffer.0.get().try_into() {
                 Ok(fb) => {
                     if let Err(err) = self.ctx.render::<()>(fb, size.width, size.height, true) {
@@ -156,7 +160,10 @@ impl VideoRenderer {
         });
     }
 
-    fn ensure_resources(&mut self, size: FramebufferSize) -> anyhow::Result<GlResources> {
+    /// Returns the framebuffer plus whether it was (re)allocated by this
+    /// call (see `show`: a fresh target must be re-rendered even when mpv
+    /// reports no new frame, e.g. while paused).
+    fn ensure_resources(&mut self, size: FramebufferSize) -> anyhow::Result<(GlResources, bool)> {
         let needs_alloc = match &self.resources {
             Some(res) => res.size != size,
             None => true,
@@ -170,7 +177,7 @@ impl VideoRenderer {
             }
             self.resources = Some(unsafe { allocate_framebuffer(&self.gl, size)? });
         }
-        Ok(self.resources.expect("just allocated"))
+        Ok((self.resources.expect("just allocated"), needs_alloc))
     }
 
     /// Frees GL resources; call from `App::on_exit`.
