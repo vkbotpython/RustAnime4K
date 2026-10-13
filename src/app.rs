@@ -1048,15 +1048,19 @@ impl eframe::App for Anime4KPlayerApp {
         if !hide_chrome {
             self.menu_bar(ui);
         }
-        // egui order: top, bottom, side, central.
-        let show_controls = !hide_chrome || self.mouse_in_bottom_zone(&ctx);
-        if show_controls {
-            self.controls_panel(ui);
-        }
+        // egui order: top, side, bottom, central. The playlist docks
+        // full-height on the right on purpose: sharing only a clean
+        // T-junction with the bottom bar makes any overlap between them
+        // structurally impossible (a side panel stacked *above* the bottom
+        // bar kept bleeding its separator into it).
         let show_playlist =
             self.playlist_visible && (!hide_chrome || self.mouse_in_right_zone(&ctx));
         if show_playlist {
             self.playlist_panel(ui);
+        }
+        let show_controls = !hide_chrome || self.mouse_in_bottom_zone(&ctx);
+        if show_controls {
+            self.controls_panel(ui);
         }
         let video_start = Instant::now();
         self.video_panel(ui);
@@ -1703,22 +1707,46 @@ impl Anime4KPlayerApp {
                     let ctx = ui.ctx().clone();
                     self.do_play_index(&ctx, i);
                 }
-                // Source info: folder path, or "URL" for links.
-                // Truncated: with the width capped, a long path must not
-                // paint past the panel frame.
-                if let Some(cur) = self.player.current_file() {
-                    let s = cur.to_string_lossy();
-                    if is_url_like(&s) {
-                        ui.monospace("URL");
-                    } else if let Some(parent) = cur.parent() {
-                        ui.add(
-                            egui::Label::new(
-                                egui::RichText::new(parent.to_string_lossy()).monospace(),
-                            )
-                            .truncate(),
-                        );
+                // List above, source info pinned to the bottom: the scroll
+                // area fills only the *remaining* height, so the footer can
+                // never overflow the panel into the controls bar.
+                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+                    // Source info: folder path, or "URL" for links.
+                    // Truncated: with the width capped, a long path must not
+                    // paint past the panel frame.
+                    if let Some(cur) = self.player.current_file() {
+                        let s = cur.to_string_lossy();
+                        if is_url_like(&s) {
+                            ui.monospace("URL");
+                        } else if let Some(parent) = cur.parent() {
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(parent.to_string_lossy()).monospace(),
+                                )
+                                .truncate(),
+                            );
+                        }
                     }
-                }
+                    // NB: a vertical ScrollArea shrinks horizontally to fit
+                    // its content by default. The panel frame then covers
+                    // only the text width and anything dragged wider stays
+                    // unpainted (black strip). Forcing full width keeps the
+                    // frame over the whole allocation.
+                    egui::ScrollArea::vertical()
+                        .auto_shrink([false, false])
+                        .show(ui, |ui| {
+                            // Stretch rows across the full width so the
+                            // highlight and the frame cover the whole panel,
+                            // not just text.
+                            ui.set_width(ui.available_width());
+                            for (i, name) in names.iter().enumerate() {
+                                let selected = current == Some(i);
+                                if ui.selectable_label(selected, name).clicked() {
+                                    chosen = Some(i);
+                                }
+                            }
+                        });
+                });
             });
     }
 

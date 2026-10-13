@@ -6,7 +6,7 @@
   Повторяет шаги CI (ci.yml / release.yml) локально:
   fmt + clippy + test, затем cargo build --release [--features video],
   smoke-тест (--help) и сборка папки dist/anime4k-player (exe + libmpv-2.dll
-  + shaders/images/docs + favicon + README + LICENSE).
+  + shaders + README + LICENSE).
   Для линковки фичи video используется готовый mpvlib-local/mpv.lib, путь
   к нему задан в одном месте — .cargo/config.toml (build.rustflags),
   поэтому одинаков у ручных `cargo ...` и у скриптов. Иначе cargo
@@ -209,10 +209,11 @@ if (-not $NoPackage) {
   if ($Video) {
     Copy-Item (Join-Path $RepoRoot 'target\release\libmpv-2.dll') $Dist/
   }
+  # Только рантайм-зависимости: шейдеры резолвятся от каталога exe.
+  # images/ (иконка вшита в exe через build.rs/include_bytes),
+  # docs/ (справка встроена в код) и favicon.ico (нужен только
+  # build.rs и инсталлятору, из assets/) в portable-пакет не кладём.
   Copy-Item (Join-Path $RepoRoot 'assets\shaders') (Join-Path $Dist 'shaders') -Recurse
-  Copy-Item (Join-Path $RepoRoot 'assets\images') (Join-Path $Dist 'images') -Recurse
-  Copy-Item (Join-Path $RepoRoot 'assets\docs') (Join-Path $Dist 'docs') -Recurse
-  Copy-Item (Join-Path $RepoRoot 'assets\favicon.ico') $Dist/
   Copy-Item (Join-Path $RepoRoot 'README.md'), (Join-Path $RepoRoot 'LICENSE') $Dist/
   Write-Host "Готово: $Dist"
   if ($Zip) {

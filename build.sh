@@ -78,8 +78,11 @@ if [ "$NO_PACKAGE" -eq 0 ]; then
   rm -rf dist
   mkdir -p dist/anime4k-player/lib
   cp target/release/anime4k-player dist/anime4k-player/
-  cp -r assets/shaders assets/images assets/docs dist/anime4k-player/
-  cp assets/favicon.ico packaging/linux/*.desktop README.md LICENSE dist/anime4k-player/
+  # Только рантайм-зависимости: шейдеры резолвятся от каталога exe.
+  # images/ (иконка вшита в бинарь), docs/ (справка встроена в код)
+  # и favicon.ico (нужен только build.rs и инсталлятору) не кладём.
+  cp -r assets/shaders dist/anime4k-player/
+  cp packaging/linux/*.desktop README.md LICENSE dist/anime4k-player/
   if [ "$NO_VIDEO" -eq 0 ]; then
     # Bundle libmpv.so + приватные зависимости (цепочка ffmpeg, ...).
     # Хостовые стеки (glibc, X11/Wayland, Mesa/GL, DRM) исключаются.

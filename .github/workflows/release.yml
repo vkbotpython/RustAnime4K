@@ -90,9 +90,6 @@ jobs:
           Copy-Item target/release/anime4k-player.exe dist/anime4k-player/
           Copy-Item target/release/libmpv-2.dll dist/anime4k-player/
           Copy-Item assets/shaders dist/anime4k-player/shaders -Recurse
-          Copy-Item assets/images dist/anime4k-player/images -Recurse
-          Copy-Item assets/docs dist/anime4k-player/docs -Recurse
-          Copy-Item assets/favicon.ico dist/anime4k-player/
           Copy-Item README.md, LICENSE dist/anime4k-player/
           Compress-Archive -Path dist/anime4k-player -DestinationPath ${{ matrix.archive }}
 
@@ -109,8 +106,8 @@ jobs:
         run: |
           mkdir -p dist/anime4k-player/lib
           cp target/release/anime4k-player dist/anime4k-player/
-          cp -r assets/shaders assets/images assets/docs dist/anime4k-player/
-          cp assets/favicon.ico packaging/linux/*.desktop README.md LICENSE dist/anime4k-player/
+          cp -r assets/shaders dist/anime4k-player/
+          cp packaging/linux/*.desktop README.md LICENSE dist/anime4k-player/
           # Bundle libmpv.so + its private deps (ffmpeg chain, ...).
           # Host-provided stacks (glibc, X11/Wayland, Mesa/GL, DRM) are excluded.
           EXCLUDE='^lib(c|m|dl|pthread|rt|resolv)\.so|ld-linux|libGL\.|libEGL\.|libGLX|libGLdispatch|libOpenGL|libX11\.|libxcb\.|libXau\.|libXdmcp\.|libxkb|libwayland|libdrm\.|libvulkan\.|libgbm\.'
