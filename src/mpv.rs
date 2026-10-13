@@ -372,7 +372,7 @@ impl LibMpv {
 unsafe fn libc_set_numeric_c() {
     unsafe {
         // setlocale(LC_NUMERIC=4, "C")
-        extern "C" {
+        unsafe extern "C" {
             fn setlocale(
                 category: i32,
                 locale: *const std::os::raw::c_char,

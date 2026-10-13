@@ -1094,7 +1094,7 @@ impl Anime4KPlayerApp {
                 if first_new {
                     self.player.open_file(&*self.mpv, &path);
                     self.set_opened("file", &path.to_string_lossy());
-                    self.refresh_title(ctx);
+                    self.after_file_changed(ctx);
                     first_new = false;
                 } else {
                     self.player.add_file(path);
