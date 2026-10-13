@@ -337,15 +337,18 @@ impl LibMpv {
                     let _ = init.set_option("log-file", log_value.as_str());
                 }
             }
-            // NOTE: no `video-timing-offset=0` here on purpose. With the
-            // default offset render() blocks until the target display time,
-            // pacing presentation to the video clock (audio sync mode).
-            // Setting it to 0 disables that pacing; combined with a busy
-            // repaint loop the UI thread then renders redundantly at max
-            // rate, saturates the GPU (hwdec + gpu-hq + Anime4K contend for
-            // it) and wedges A/V sync into frame-by-frame stutter with
-            // audio artifacts. Per-frame pacing comes from render() itself
-            // plus the update-callback repaints (see video.rs).
+            // Non-blocking render(): with the default timing offset render()
+            // sleeps until the target display time, and since it runs on the
+            // UI thread the whole window would tick at video rate (~41 ms
+            // per frame at 24 fps — laggy menus, slider and clicks). With
+            // offset 0 render() returns the latest frame immediately; pacing
+            // comes from the update-callback repaints (video rate) plus
+            // eframe vsync (display rate). A/V sync is unaffected: the audio
+            // clock drives decoding, `report_swap()` reports presents.
+            // (An earlier revision blamed this option for frame-by-frame
+            // playback — the actual cause was a seek storm from the timeline
+            // slider's `step_by` + `changed()`; seeks are gesture-gated now.)
+            init.set_option("video-timing-offset", "0")?;
             // URL playback (mirrors python-mpv `ytdl=True`); ignore the error
             // on builds without youtube-dl support so init still succeeds.
             let _ = init.set_option("ytdl", "yes");

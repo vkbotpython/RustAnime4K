@@ -975,13 +975,10 @@ impl eframe::App for AnimePlayerApp {
         // Per-frame repaints come from the render-context update callback
         // (see VideoRenderer::new): it fires exactly when mpv has a new
         // frame, so playback runs at video rate without a busy loop here.
-        // A busy request_repaint() spin would re-render the same frame
-        // redundantly at max rate, peg the UI thread/GPU (hwdec + gpu-hq +
-        // Anime4K contend for the same GPU) and wedge A/V sync into
-        // frame-by-frame stutter with audio artifacts and eventual freeze.
-        // render() itself blocks to the video clock (default
-        // video-timing-offset), pacing presentation; this 100 ms fallback
-        // only drives the slider/clock UI.
+        // render() itself never blocks (video-timing-offset=0, see mpv.rs):
+        // keeping ui() to a few ms is what lets the window stay at display
+        // rate while video advances at its own rate. This 100 ms fallback
+        // only drives the slider/clock UI when no video frames arrive.
         // Mirrors the QTimer(100ms) tick.
         ctx.request_repaint_after(Duration::from_millis(100));
         self.handle_dropped_files(&ctx);
