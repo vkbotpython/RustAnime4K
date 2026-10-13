@@ -21,6 +21,7 @@ use std::sync::Arc;
 use clap::Parser;
 
 use app::{APP_NAME, Anime4KPlayerApp};
+use config::ConfigManager;
 use mpv::MpvBackend;
 
 #[derive(Parser, Debug)]
@@ -57,11 +58,39 @@ fn main() -> eframe::Result<()> {
     let cli = Cli::parse();
     let backend = create_backend();
 
-    let viewport = egui::ViewportBuilder::default()
+    // Last window geometry (see `track_window_geometry`): restore position,
+    // size and maximized state, falling back to defaults on first launch
+    // or corrupt values.
+    let cfg = ConfigManager::new("config.json");
+    let num = |key: &str| cfg.get(key).and_then(serde_json::Value::as_f64);
+    let size = match (num("windowW"), num("windowH")) {
+        (Some(w), Some(h)) if w >= 400.0 && h >= 300.0 && w <= 7680.0 && h <= 4320.0 => {
+            [w as f32, h as f32]
+        }
+        _ => [1100.0, 700.0],
+    };
+    let maximized = cfg
+        .get("windowMaximized")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let mut viewport = egui::ViewportBuilder::default()
         .with_title(APP_NAME)
         .with_min_inner_size([800.0, 600.0])
-        .with_inner_size([1100.0, 700.0])
+        .with_inner_size(size)
         .with_icon(load_app_icon());
+    if maximized {
+        viewport = viewport.with_maximized(true);
+    } else if let (Some(x), Some(y)) = (num("windowX"), num("windowY")) {
+        if x.is_finite()
+            && y.is_finite()
+            && x > -10000.0
+            && x < 10000.0
+            && y > -10000.0
+            && y < 10000.0
+        {
+            viewport = viewport.with_position([x as f32, y as f32]);
+        }
+    }
 
     let options = eframe::NativeOptions {
         viewport,

@@ -36,6 +36,12 @@ const FULLSCREEN_RIGHT_ZONE: f32 = 120.0;
 /// stays in the video corner before auto-clearing.
 const STATUS_TTL: Duration = Duration::from_secs(4);
 
+/// egui pairs clicks into a double click within 300 ms
+/// (`max_double_click_delay`): a single-click play/pause newer than this
+/// is reverted when the double click lands (see `consume_click_revert`),
+/// so entering fullscreen never disturbs playback.
+const DOUBLE_CLICK_REVERT_WINDOW: Duration = Duration::from_millis(400);
+
 const SPEEDS: &[f64] = &[
     0.25, 0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 2.75, 3.0,
 ];
@@ -235,6 +241,14 @@ pub struct Anime4KPlayerApp {
     last_mouse_pos: Option<egui::Pos2>,
     last_mouse_time: Instant,
 
+    /// When a single click last toggled play/pause. A double click starts
+    /// as a single click, so a still-fresh toggle is reverted when the
+    /// double click switches fullscreen (see `consume_click_revert`).
+    click_play_armed_at: Option<Instant>,
+
+    /// Last disk flush of the window geometry (see `track_window_geometry`).
+    last_window_save: Option<Instant>,
+
     /// Set once the current EOF episode has been handled. `eof-reached`
     /// stays true across frames (and can briefly report a stale value right
     /// after `loadfile`), so without edge detection a single EOF would
@@ -386,6 +400,8 @@ impl Anime4KPlayerApp {
             config,
             last_mouse_pos: None,
             last_mouse_time: Instant::now(),
+            click_play_armed_at: None,
+            last_window_save: None,
             eof_handled: false,
             snap: MpvSnapshot {
                 volume,
@@ -1102,6 +1118,13 @@ impl eframe::App for Anime4KPlayerApp {
         self.poll_mpv();
         self.flush_pending_preset();
         self.expire_status();
+        if matches!(
+            self.click_play_armed_at,
+            Some(t) if t.elapsed() >= DOUBLE_CLICK_REVERT_WINDOW
+        ) {
+            self.click_play_armed_at = None;
+        }
+        self.track_window_geometry(&ctx);
         // Per-frame repaints come from the render-context update callback
         // (see VideoRenderer::new): it fires exactly when mpv has a new
         // frame, so playback runs at video rate without a busy loop here.
@@ -1443,7 +1466,10 @@ impl Anime4KPlayerApp {
                     resp
                 })
                 .inner;
-            // Single click = play/pause, double click = fullscreen.
+            // Single click = play/pause, double click = fullscreen. A double
+            // click physically starts with a single click that already
+            // toggled playback: revert that toggle instead of delaying
+            // single clicks (see `consume_click_revert`).
             use egui::PointerButton;
             let fullscreen_click = resp.double_clicked_by(PointerButton::Primary);
             let play_click = !fullscreen_click && resp.clicked_by(PointerButton::Primary);
@@ -1451,10 +1477,14 @@ impl Anime4KPlayerApp {
                 self.context_menu(ui);
             });
             if fullscreen_click {
+                if self.consume_click_revert() {
+                    self.toggle_play();
+                }
                 let ctx = ui.ctx().clone();
                 self.toggle_fullscreen(&ctx);
             } else if play_click {
                 self.toggle_play();
+                self.click_play_armed_at = Some(Instant::now());
             }
             return;
         }
@@ -1499,10 +1529,16 @@ impl Anime4KPlayerApp {
             });
         });
         if clicked_fullscreen {
+            // Same revert as the video branch above: the double click's
+            // first tap already toggled playback.
+            if self.consume_click_revert() {
+                self.toggle_play();
+            }
             let ctx = ui.ctx().clone();
             self.toggle_fullscreen(&ctx);
         } else if clicked_play {
             self.toggle_play();
+            self.click_play_armed_at = Some(Instant::now());
         }
     }
 
@@ -1859,7 +1895,84 @@ impl Anime4KPlayerApp {
 
     fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
         self.player.fullscreen = !self.player.fullscreen;
-        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.player.fullscreen));
+        let fs = self.player.fullscreen;
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(fs));
+        // Borderless in fullscreen: otherwise the OS title bar / window
+        // frame stays on screen over the video.
+        ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(!fs));
+    }
+
+    /// A double click begins life as a single click that already flipped
+    /// play/pause (see `video_panel`): while that flip is still fresh,
+    /// report true so the caller flips it back — fullscreen then never
+    /// disturbs playback, and single clicks stay instant (no hold delay).
+    fn consume_click_revert(&mut self) -> bool {
+        let fresh = matches!(
+            self.click_play_armed_at,
+            Some(t) if t.elapsed() < DOUBLE_CLICK_REVERT_WINDOW
+        );
+        self.click_play_armed_at = None;
+        fresh
+    }
+
+    /// Remembers window position/size (windowed mode only) so the next
+    /// launch restores them. Recorded in memory every frame, flushed to
+    /// disk at most every few seconds (plus once more on exit).
+    fn track_window_geometry(&mut self, ctx: &egui::Context) {
+        if self.player.fullscreen {
+            return;
+        }
+        let maximized = ctx.input(|i| i.viewport().maximized.unwrap_or(false));
+        if maximized {
+            // Keep the last windowed rect untouched, remember only the
+            // maximized state itself.
+            let already = self
+                .config
+                .get("windowMaximized")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            if !already {
+                self.config.set("windowMaximized", json!(true));
+                self.flush_config();
+            }
+            return;
+        }
+        let (pos, size) = ctx.input(|i| (i.viewport().outer_rect, i.viewport().inner_rect));
+        let (Some(outer), Some(inner)) = (pos, size) else {
+            return;
+        };
+        let (x, y) = (outer.min.x as f64, outer.min.y as f64);
+        let (w, h) = (inner.width() as f64, inner.height() as f64);
+        if !(x.is_finite() && y.is_finite() && w > 0.0 && h > 0.0) {
+            return;
+        }
+        let get = |k: &str| self.config.get(k).and_then(Value::as_f64);
+        let close = |a: Option<f64>, b: f64| a.is_some_and(|v| (v - b).abs() < 0.5);
+        let maxed = self
+            .config
+            .get("windowMaximized")
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        if maxed
+            || !close(get("windowX"), x)
+            || !close(get("windowY"), y)
+            || !close(get("windowW"), w)
+            || !close(get("windowH"), h)
+        {
+            self.config.set("windowX", json!(x));
+            self.config.set("windowY", json!(y));
+            self.config.set("windowW", json!(w));
+            self.config.set("windowH", json!(h));
+            self.config.set("windowMaximized", json!(false));
+            let now = Instant::now();
+            if self
+                .last_window_save
+                .is_none_or(|t| now.duration_since(t) >= Duration::from_secs(2))
+            {
+                self.last_window_save = Some(now);
+                self.flush_config();
+            }
+        }
     }
 
     /// Explicit user choice: remember a standard preset for the current
