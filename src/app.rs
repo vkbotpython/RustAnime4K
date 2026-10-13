@@ -1895,11 +1895,11 @@ impl Anime4KPlayerApp {
 
     fn toggle_fullscreen(&mut self, ctx: &egui::Context) {
         self.player.fullscreen = !self.player.fullscreen;
-        let fs = self.player.fullscreen;
-        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(fs));
-        // Borderless in fullscreen: otherwise the OS title bar / window
-        // frame stays on screen over the video.
-        ctx.send_viewport_cmd(egui::ViewportCommand::Decorations(!fs));
+        // Borderless fullscreen covers the monitor with no OS frame by
+        // itself. Do NOT combine with `Decorations(false)`: restyling the
+        // window while it is fullscreen confuses DWM and leaves a broken
+        // black border/shadow around the window.
+        ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(self.player.fullscreen));
     }
 
     /// A double click begins life as a single click that already flipped
