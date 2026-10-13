@@ -1797,14 +1797,13 @@ impl Anime4KPlayerApp {
                 egui::ComboBox::from_id_salt("lang")
                     .selected_text(self.settings_lang.config_value())
                     .show_ui(ui, |ui| {
-                        for lang in [
+                        ui.selectable_value(
+                            &mut self.settings_lang,
                             Lang::Auto,
-                            Lang::English,
-                            Lang::Russian,
-                            Lang::Japanese,
-                            Lang::PortugueseBrazil,
-                        ] {
-                            ui.selectable_value(&mut self.settings_lang, lang, lang.config_value());
+                            Lang::Auto.config_value(),
+                        );
+                        for lang in Lang::all() {
+                            ui.selectable_value(&mut self.settings_lang, *lang, lang.config_value());
                         }
                     });
                 ui.checkbox(&mut self.settings_open_last, open_last_label);

@@ -14,35 +14,111 @@ pub enum Lang {
     Russian,
     Japanese,
     PortugueseBrazil,
+    Spanish,
+    German,
+    French,
+    Italian,
+    ChineseSimplified,
+    ChineseTraditional,
+    Korean,
+    Ukrainian,
+    Polish,
+    Turkish,
+    Arabic,
+    Hindi,
+    Indonesian,
+    Vietnamese,
+    Thai,
+    Dutch,
+    Czech,
+    Hungarian,
+    Romanian,
+    Swedish,
+    Portuguese,
 }
 
 impl Lang {
+    /// All selectable languages (excludes `Auto`).
+    pub fn all() -> &'static [Lang] {
+        use Lang::*;
+        &[
+            English,
+            Russian,
+            Japanese,
+            PortugueseBrazil,
+            Spanish,
+            German,
+            French,
+            Italian,
+            ChineseSimplified,
+            ChineseTraditional,
+            Korean,
+            Ukrainian,
+            Polish,
+            Turkish,
+            Arabic,
+            Hindi,
+            Indonesian,
+            Vietnamese,
+            Thai,
+            Dutch,
+            Czech,
+            Hungarian,
+            Romanian,
+            Swedish,
+            Portuguese,
+        ]
+    }
+
     pub fn from_config_value(value: Option<&str>) -> Self {
-        match value {
-            Some("Русский") => Self::Russian,
-            Some("English") => Self::English,
-            Some("Japanese") => Self::Japanese,
-            Some("Português (Brasil)") => Self::PortugueseBrazil,
-            _ => Self::Auto,
+        let value = value.unwrap_or("Auto");
+        if value == "Auto" {
+            return Self::Auto;
         }
+        Self::all()
+            .iter()
+            .find(|l| l.config_value() == value)
+            .copied()
+            .unwrap_or(Self::Auto)
     }
 
     pub fn config_value(self) -> &'static str {
-        match self {
-            Self::Auto => "Auto",
-            Self::English => "English",
-            Self::Russian => "Русский",
-            Self::Japanese => "Japanese",
-            Self::PortugueseBrazil => "Português (Brasil)",
-        }
+        self.info().0
     }
 
     fn file_key(self) -> &'static str {
+        self.info().1
+    }
+
+    /// (config display name, translation file key) per language.
+    fn info(self) -> (&'static str, &'static str) {
         match self {
-            Self::Auto | Self::English => "en",
-            Self::Russian => "ru",
-            Self::Japanese => "ja",
-            Self::PortugueseBrazil => "pt-BR",
+            Self::Auto => ("Auto", "en"),
+            Self::English => ("English", "en"),
+            Self::Russian => ("Русский", "ru"),
+            Self::Japanese => ("Japanese", "ja"),
+            Self::PortugueseBrazil => ("Português (Brasil)", "pt-BR"),
+            Self::Spanish => ("Español", "es"),
+            Self::German => ("Deutsch", "de"),
+            Self::French => ("Français", "fr"),
+            Self::Italian => ("Italiano", "it"),
+            Self::ChineseSimplified => ("简体中文", "zh-CN"),
+            Self::ChineseTraditional => ("繁體中文", "zh-TW"),
+            Self::Korean => ("한국어", "ko"),
+            Self::Ukrainian => ("Українська", "uk"),
+            Self::Polish => ("Polski", "pl"),
+            Self::Turkish => ("Türkçe", "tr"),
+            Self::Arabic => ("العربية", "ar"),
+            Self::Hindi => ("हिन्दी", "hi"),
+            Self::Indonesian => ("Bahasa Indonesia", "id"),
+            Self::Vietnamese => ("Tiếng Việt", "vi"),
+            Self::Thai => ("ไทย", "th"),
+            Self::Dutch => ("Nederlands", "nl"),
+            Self::Czech => ("Čeština", "cs"),
+            Self::Hungarian => ("Magyar", "hu"),
+            Self::Romanian => ("Română", "ro"),
+            Self::Swedish => ("Svenska", "sv"),
+            Self::Portuguese => ("Português", "pt"),
         }
     }
 }
@@ -52,6 +128,27 @@ fn load_table(key: &str) -> HashMap<String, String> {
         "ru" => include_str!("../assets/i18n/ru.json"),
         "ja" => include_str!("../assets/i18n/ja.json"),
         "pt-BR" => include_str!("../assets/i18n/pt-BR.json"),
+        "es" => include_str!("../assets/i18n/es.json"),
+        "de" => include_str!("../assets/i18n/de.json"),
+        "fr" => include_str!("../assets/i18n/fr.json"),
+        "it" => include_str!("../assets/i18n/it.json"),
+        "zh-CN" => include_str!("../assets/i18n/zh-CN.json"),
+        "zh-TW" => include_str!("../assets/i18n/zh-TW.json"),
+        "ko" => include_str!("../assets/i18n/ko.json"),
+        "uk" => include_str!("../assets/i18n/uk.json"),
+        "pl" => include_str!("../assets/i18n/pl.json"),
+        "tr" => include_str!("../assets/i18n/tr.json"),
+        "ar" => include_str!("../assets/i18n/ar.json"),
+        "hi" => include_str!("../assets/i18n/hi.json"),
+        "id" => include_str!("../assets/i18n/id.json"),
+        "vi" => include_str!("../assets/i18n/vi.json"),
+        "th" => include_str!("../assets/i18n/th.json"),
+        "nl" => include_str!("../assets/i18n/nl.json"),
+        "cs" => include_str!("../assets/i18n/cs.json"),
+        "hu" => include_str!("../assets/i18n/hu.json"),
+        "ro" => include_str!("../assets/i18n/ro.json"),
+        "sv" => include_str!("../assets/i18n/sv.json"),
+        "pt" => include_str!("../assets/i18n/pt.json"),
         _ => include_str!("../assets/i18n/en.json"),
     };
     serde_json::from_str(text).expect("i18n json must parse")
@@ -60,23 +157,58 @@ fn load_table(key: &str) -> HashMap<String, String> {
 fn tables() -> &'static HashMap<&'static str, HashMap<String, String>> {
     static TABLES: OnceLock<HashMap<&'static str, HashMap<String, String>>> = OnceLock::new();
     TABLES.get_or_init(|| {
-        HashMap::from([
-            ("en", load_table("en")),
-            ("ru", load_table("ru")),
-            ("ja", load_table("ja")),
-            ("pt-BR", load_table("pt-BR")),
-        ])
+        let mut m = HashMap::new();
+        for key in core::iter::once("en").chain(Lang::all().iter().map(|l| l.file_key())) {
+            m.entry(key).or_insert_with(|| load_table(key));
+        }
+        m
     })
 }
 
 /// Detects the system language.
 pub fn detect_system_lang() -> Lang {
     let locale = sys_locale::get_locale().unwrap_or_else(|| "en".to_string());
-    let short = locale.split(['_', '-', '.']).next().unwrap_or("en");
-    match short.to_lowercase().as_str() {
+    let loc = locale.to_lowercase();
+    // Script/region disambiguation first.
+    if loc.starts_with("zh") {
+        if loc.contains("tw")
+            || loc.contains("hk")
+            || loc.contains("hant")
+            || loc.contains("mo")
+        {
+            return Lang::ChineseTraditional;
+        }
+        return Lang::ChineseSimplified;
+    }
+    if loc.starts_with("pt") {
+        return if loc.contains("br") {
+            Lang::PortugueseBrazil
+        } else {
+            Lang::Portuguese
+        };
+    }
+    let short = loc.split(['_', '-', '.']).next().unwrap_or("en");
+    match short {
         "ru" => Lang::Russian,
         "ja" => Lang::Japanese,
-        "pt" => Lang::PortugueseBrazil,
+        "es" => Lang::Spanish,
+        "de" => Lang::German,
+        "fr" => Lang::French,
+        "it" => Lang::Italian,
+        "ko" => Lang::Korean,
+        "uk" => Lang::Ukrainian,
+        "pl" => Lang::Polish,
+        "tr" => Lang::Turkish,
+        "ar" => Lang::Arabic,
+        "hi" => Lang::Hindi,
+        "id" | "in" => Lang::Indonesian,
+        "vi" => Lang::Vietnamese,
+        "th" => Lang::Thai,
+        "nl" => Lang::Dutch,
+        "cs" => Lang::Czech,
+        "hu" => Lang::Hungarian,
+        "ro" => Lang::Romanian,
+        "sv" => Lang::Swedish,
         _ => Lang::English,
     }
 }
@@ -116,11 +248,32 @@ mod tests {
         let tables = tables();
         let en = &tables["en"];
         assert!(!en.is_empty());
-        for lang in ["ru", "ja", "pt-BR"] {
+        for lang in Lang::all() {
+            let table = &tables[lang.file_key()];
             for key in en.keys() {
-                assert!(tables[lang].contains_key(key), "missing {key} in {lang}");
+                assert!(
+                    table.contains_key(key),
+                    "missing {key} in {}",
+                    lang.file_key()
+                );
             }
         }
+    }
+
+    #[test]
+    fn language_count() {
+        // Auto + every entry in `all()`.
+        assert_eq!(Lang::all().len(), 25);
+    }
+
+    #[test]
+    fn config_values_roundtrip() {
+        for lang in Lang::all() {
+            assert_eq!(Lang::from_config_value(Some(lang.config_value())), *lang);
+        }
+        assert_eq!(Lang::from_config_value(Some("Auto")), Lang::Auto);
+        assert_eq!(Lang::from_config_value(None), Lang::Auto);
+        assert_eq!(Lang::from_config_value(Some("???")), Lang::Auto);
     }
 
     #[test]
