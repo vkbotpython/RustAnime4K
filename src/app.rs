@@ -1421,6 +1421,18 @@ impl Anime4KPlayerApp {
         }
     }
 
+    /// Central panel for the video surface. Fullscreen is pure cinema:
+    /// the default 8px panel margin (`Frame::central_panel`) is dropped so
+    /// the picture reaches the screen edges instead of sitting in a black
+    /// frame. Windowed mode keeps the margin.
+    fn video_central_panel(fullscreen: bool) -> egui::CentralPanel {
+        let mut panel = egui::CentralPanel::default();
+        if fullscreen {
+            panel = panel.frame(egui::Frame::NONE);
+        }
+        panel
+    }
+
     fn video_panel(&mut self, ui: &mut egui::Ui) {
         #[cfg(feature = "video")]
         if self.video.is_some() {
@@ -1431,7 +1443,7 @@ impl Anime4KPlayerApp {
                 .video
                 .as_ref()
                 .and_then(|r| r.last_error().map(str::to_string));
-            let resp = egui::CentralPanel::default()
+            let resp = Self::video_central_panel(self.player.fullscreen)
                 .show(ui, |ui| {
                     // A wide playlist can starve the center of space: clamp
                     // the allocation so a negative size can't invert the rect
@@ -1490,7 +1502,7 @@ impl Anime4KPlayerApp {
         }
         let mut clicked_play = false;
         let mut clicked_fullscreen = false;
-        egui::CentralPanel::default().show(ui, |ui| {
+        Self::video_central_panel(self.player.fullscreen).show(ui, |ui| {
             // Same degenerate-rect guard as the video branch above.
             let available = ui.available_size();
             let available = egui::vec2(available.x.max(0.0), available.y.max(0.0));

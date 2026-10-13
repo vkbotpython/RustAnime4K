@@ -80,16 +80,15 @@ fn main() -> eframe::Result<()> {
         .with_icon(load_app_icon());
     if maximized {
         viewport = viewport.with_maximized(true);
-    } else if let (Some(x), Some(y)) = (num("windowX"), num("windowY")) {
-        if x.is_finite()
-            && y.is_finite()
-            && x > -10000.0
-            && x < 10000.0
-            && y > -10000.0
-            && y < 10000.0
-        {
-            viewport = viewport.with_position([x as f32, y as f32]);
-        }
+    } else if let (Some(x), Some(y)) = (num("windowX"), num("windowY"))
+        && x.is_finite()
+        && y.is_finite()
+        && x > -10000.0
+        && x < 10000.0
+        && y > -10000.0
+        && y < 10000.0
+    {
+        viewport = viewport.with_position([x as f32, y as f32]);
     }
 
     let options = eframe::NativeOptions {
