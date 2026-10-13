@@ -60,6 +60,13 @@ fi
 step 'cargo build --release'
 cargo build --release "${FEATURES[@]}"
 
+# Шейдеры рядом с exe: glsl-shaders резолвится от каталога exe, без них
+# пресеты Anime4K молча не применяются при запуске из target/release.
+if [ "$NO_VIDEO" -eq 0 ]; then
+  mkdir -p target/release/shaders
+  cp -r assets/shaders/. target/release/shaders/
+fi
+
 # --- 3. Smoke-тест ---
 step 'smoke-test: anime-player --help'
 ./target/release/anime-player --help >/dev/null

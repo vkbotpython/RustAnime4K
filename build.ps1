@@ -170,6 +170,8 @@ $Exe = Join-Path $RepoRoot 'target\release\anime-player.exe'
 if (-not (Test-Path $Exe)) { throw "Сборка не дала $Exe" }
 
 # DLL рядом с exe, чтобы прошёл smoke-тест и запуск (как в release.yml).
+# Шейдеры туда же: glsl-shaders резолвится от каталога exe, без них
+# пресеты Anime4K молча не применяются при запуске из target/release.
 if ($Video) {
   $DllDest = Join-Path $RepoRoot 'target\release\libmpv-2.dll'
   $same = [string]::Equals(
@@ -179,6 +181,11 @@ if ($Video) {
   if (-not $same) {
     Copy-Item $DllPath $DllDest -Force
   }
+  $ShadersDest = Join-Path $RepoRoot 'target\release\shaders'
+  if (-not (Test-Path $ShadersDest)) {
+    New-Item -ItemType Directory -Force $ShadersDest | Out-Null
+  }
+  Copy-Item (Join-Path $RepoRoot 'assets\shaders\*') $ShadersDest -Recurse -Force
 }
 
 # --- 3. Smoke-тест -----------------------------------------------------------

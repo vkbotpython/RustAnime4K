@@ -55,15 +55,42 @@ fn fmt_time(secs: f64) -> String {
 }
 
 fn shaders_dir() -> PathBuf {
-    let exe_dir = std::env::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|d| d.to_path_buf()));
-    if let Some(dir) = exe_dir.map(|d| d.join("shaders")) {
-        if dir.is_dir() {
-            return dir;
+    // Install/dist layout: shaders next to the exe.
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(exe_dir) = exe.parent() {
+            let direct = exe_dir.join("shaders");
+            if direct.is_dir() {
+                return direct;
+            }
+            // Dev layout (`target/release/anime-player`, repo launched from
+            // anywhere): walk up from the exe dir looking for assets/shaders.
+            let mut dir = exe_dir.to_path_buf();
+            for _ in 0..4 {
+                let cand = dir.join("assets").join("shaders");
+                if cand.is_dir() {
+                    return cand;
+                }
+                if !dir.pop() {
+                    break;
+                }
+            }
+            // Install layout, even if (currently) missing — callers report it.
+            return direct;
         }
     }
+    // Repo-root launch (CWD-dependent last resort).
     PathBuf::from("assets/shaders")
+}
+
+/// Names from `preset` missing under `dir`. A preset pointing at absent
+/// files must never reach mpv silently: `glsl-shaders` with garbage paths
+/// just doesn't upscale, looking "worse than mpv.net with the same preset".
+fn missing_shader_files(dir: &Path, preset: &[String]) -> Vec<String> {
+    preset
+        .iter()
+        .filter(|s| !dir.join(s).is_file())
+        .cloned()
+        .collect()
 }
 
 /// Parses the safe `name=value` subset of launch parameters
@@ -780,7 +807,8 @@ impl AnimePlayerApp {
     }
 
     /// Applies a stored choice without re-saving it.
-    /// Returns false when it can't be built (stale data).
+    /// Returns false when it can't be built (stale data) or its shader
+    /// files are missing (reported in `status`, never applied silently).
     fn apply_choice(&mut self, choice: &PresetChoice) -> bool {
         match choice {
             PresetChoice::Disabled => {
@@ -789,28 +817,50 @@ impl AnimePlayerApp {
             }
             PresetChoice::Standard { quality, mode } => {
                 match anime4k::create_preset(quality, mode) {
-                    Ok(preset) => {
-                        let value = anime4k::preset_to_glsl_shaders(&shaders_dir(), &preset);
-                        self.player.apply_preset(
-                            &*self.mpv,
-                            &format!("{mode} ({quality})"),
-                            &value,
-                        );
-                        true
-                    }
+                    Ok(preset) => match self.glsl_value(&preset) {
+                        Some(value) => {
+                            self.player.apply_preset(
+                                &*self.mpv,
+                                &format!("{mode} ({quality})"),
+                                &value,
+                            );
+                            true
+                        }
+                        None => false,
+                    },
                     Err(_) => false,
                 }
             }
             PresetChoice::Hq { name } => match anime4k::ultra_hq_presets().get(name.as_str()) {
-                Some(preset) => {
-                    let value = anime4k::preset_to_glsl_shaders(&shaders_dir(), preset);
-                    self.player
-                        .apply_preset(&*self.mpv, &format!("{name} (HQ)"), &value);
-                    true
-                }
+                Some(preset) => match self.glsl_value(preset) {
+                    Some(value) => {
+                        self.player
+                            .apply_preset(&*self.mpv, &format!("{name} (HQ)"), &value);
+                        true
+                    }
+                    None => false,
+                },
                 None => false,
             },
         }
+    }
+
+    /// Builds the `glsl-shaders` value for `preset`, or reports missing
+    /// shader files in `status` (visible in the video corner) and returns
+    /// `None` so the caller skips the (ineffective) property write.
+    fn glsl_value(&mut self, preset: &[String]) -> Option<String> {
+        let dir = shaders_dir();
+        let missing = missing_shader_files(&dir, preset);
+        if missing.is_empty() {
+            return Some(anime4k::preset_to_glsl_shaders(&dir, preset));
+        }
+        self.status = format!(
+            "{}: Anime4K shaders not found in {} (e.g. {})",
+            self.t("Error"),
+            dir.display(),
+            missing.first().map(String::as_str).unwrap_or("*.glsl"),
+        );
+        None
     }
 
     /// Called whenever the current file changes (or playback starts from
@@ -2447,6 +2497,18 @@ mod tests {
             "video.mp4"
         );
         assert_eq!(display_name_of("/media/a.mkv"), "a.mkv");
+    }
+
+    #[test]
+    fn missing_shader_files_detects_absent() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.glsl"), "// x").unwrap();
+        let preset = vec!["a.glsl".to_string(), "b.glsl".to_string()];
+        assert_eq!(
+            missing_shader_files(dir.path(), &preset),
+            vec!["b.glsl".to_string()]
+        );
+        assert!(missing_shader_files(dir.path(), &["a.glsl".to_string()]).is_empty());
     }
 
     #[test]
