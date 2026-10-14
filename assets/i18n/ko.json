@@ -89,5 +89,8 @@
   "Fixed multimedia control panel": "고정 미디어 제어판",
   "Offer to choose an Anime4K preset when opening a file": "파일을 열 때 Anime4K 프리셋 선택 제안",
   "Choose an Anime4K preset": "Anime4K 프리셋 선택",
-  "Don't ask again": "다시 묻지 않기"
+  "Don't ask again": "다시 묻지 않기",
+  "default": "default",
+  "compact": "compact",
+  "spacious": "spacious"
 }

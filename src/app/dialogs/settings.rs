@@ -63,6 +63,20 @@ impl Anime4KPlayerApp {
         let scheme_system = self.t("System");
         let scheme_dark = self.t("Dark");
         let scheme_light = self.t("Light");
+        let palette_system = self.t("System");
+        let style_default = self.t("default");
+        let style_compact = self.t("compact");
+        let style_spacious = self.t("spacious");
+        let scheme_selected = match self.settings_scheme {
+            ColorScheme::System => scheme_system,
+            ColorScheme::Dark => scheme_dark,
+            ColorScheme::Light => scheme_light,
+        };
+        let palette_selected: &str = if self.settings_palette == Palette::System {
+            palette_system
+        } else {
+            self.settings_palette.name()
+        };
         let russian = self.lang == Lang::Russian;
         let mut open = self.show_settings;
         let mut save = false;
@@ -156,20 +170,25 @@ impl Anime4KPlayerApp {
                         .show(ui, |ui| {
                             ui.label(palette_label);
                             egui::ComboBox::from_id_salt("palette")
-                                .selected_text(self.settings_palette.name())
+                                .selected_text(palette_selected)
                                 .show_ui(ui, |ui| {
-                                    for name in Palette::all_names() {
+                                    for &name in Palette::all_names() {
+                                        let label: &str = if name == "System" {
+                                            palette_system
+                                        } else {
+                                            name
+                                        };
                                         ui.selectable_value(
                                             &mut self.settings_palette,
                                             Palette::from_name(name),
-                                            *name,
+                                            label,
                                         );
                                     }
                                 });
                             ui.end_row();
                             ui.label(scheme_label);
                             egui::ComboBox::from_id_salt("scheme")
-                                .selected_text(self.settings_scheme.name())
+                                .selected_text(scheme_selected)
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(
                                         &mut self.settings_scheme,
@@ -195,11 +214,16 @@ impl Anime4KPlayerApp {
                             // so in the spacious style the third row ended up
                             // cut off with a scrollbar.
                             ui.horizontal(|ui| {
-                                for name in crate::theme::style::all_names() {
+                                for &name in crate::theme::style::all_names() {
+                                    let style_label: &str = match name {
+                                        crate::theme::style::COMPACT => style_compact,
+                                        crate::theme::style::SPACIOUS => style_spacious,
+                                        _ => style_default,
+                                    };
                                     ui.selectable_value(
                                         &mut self.settings_style,
-                                        (*name).to_string(),
-                                        *name,
+                                        name.to_string(),
+                                        style_label,
                                     );
                                 }
                             });

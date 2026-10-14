@@ -89,5 +89,8 @@
   "Fixed multimedia control panel": "स्थिर मल्टीमीडिया नियंत्रण पैनल",
   "Offer to choose an Anime4K preset when opening a file": "फ़ाइल खोलते समय Anime4K प्रीसेट चुनने का प्रस्ताव दें",
   "Choose an Anime4K preset": "Anime4K प्रीसेट चुनें",
-  "Don't ask again": "फिर से न पूछें"
+  "Don't ask again": "फिर से न पूछें",
+  "default": "default",
+  "compact": "compact",
+  "spacious": "spacious"
 }

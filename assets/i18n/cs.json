@@ -89,5 +89,8 @@
   "Fixed multimedia control panel": "Pevný multimediální panel",
   "Offer to choose an Anime4K preset when opening a file": "Při otevření souboru nabídnout preset Anime4K",
   "Choose an Anime4K preset": "Vyberte preset Anime4K",
-  "Don't ask again": "Příště se neptat"
+  "Don't ask again": "Příště se neptat",
+  "default": "default",
+  "compact": "compact",
+  "spacious": "spacious"
 }

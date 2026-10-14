@@ -89,5 +89,8 @@
   "Fixed multimedia control panel": "固定媒體控制面板",
   "Offer to choose an Anime4K preset when opening a file": "開啟檔案時提示選擇 Anime4K 預設",
   "Choose an Anime4K preset": "選擇 Anime4K 預設",
-  "Don't ask again": "不再詢問"
+  "Don't ask again": "不再詢問",
+  "default": "default",
+  "compact": "compact",
+  "spacious": "spacious"
 }

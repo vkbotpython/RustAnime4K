@@ -89,5 +89,8 @@
   "Fixed multimedia control panel": "Stały panel sterowania multimediami",
   "Offer to choose an Anime4K preset when opening a file": "Proponuj wybór presetu Anime4K przy otwieraniu pliku",
   "Choose an Anime4K preset": "Wybierz preset Anime4K",
-  "Don't ask again": "Nie pytaj ponownie"
+  "Don't ask again": "Nie pytaj ponownie",
+  "default": "default",
+  "compact": "compact",
+  "spacious": "spacious"
 }

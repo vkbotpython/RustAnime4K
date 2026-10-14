@@ -89,5 +89,8 @@
   "Fixed multimedia control panel": "Thanh điều khiển đa phương tiện cố định",
   "Offer to choose an Anime4K preset when opening a file": "Đề xuất preset Anime4K khi mở tệp",
   "Choose an Anime4K preset": "Chọn preset Anime4K",
-  "Don't ask again": "Không hỏi lại"
+  "Don't ask again": "Không hỏi lại",
+  "default": "default",
+  "compact": "compact",
+  "spacious": "spacious"
 }

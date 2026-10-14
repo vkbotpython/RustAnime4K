@@ -89,5 +89,8 @@
   "Fixed multimedia control panel": "لوحة تحكم الوسائط الثابتة",
   "Offer to choose an Anime4K preset when opening a file": "اقتراح اختيار إعداد Anime4K عند فتح ملف",
   "Choose an Anime4K preset": "اختر إعداد Anime4K",
-  "Don't ask again": "لا تسأل مجددًا"
+  "Don't ask again": "لا تسأل مجددًا",
+  "default": "default",
+  "compact": "compact",
+  "spacious": "spacious"
 }

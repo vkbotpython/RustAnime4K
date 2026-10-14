@@ -89,5 +89,8 @@
   "Fixed multimedia control panel": "Sabit multimedya kontrol paneli",
   "Offer to choose an Anime4K preset when opening a file": "Dosya açarken Anime4K hazır ayarı öner",
   "Choose an Anime4K preset": "Anime4K hazır ayarı seç",
-  "Don't ask again": "Bir daha sorma"
+  "Don't ask again": "Bir daha sorma",
+  "default": "default",
+  "compact": "compact",
+  "spacious": "spacious"
 }

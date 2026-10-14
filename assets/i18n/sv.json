@@ -89,5 +89,8 @@
   "Fixed multimedia control panel": "Fast multimediapanel",
   "Offer to choose an Anime4K preset when opening a file": "Erbjud Anime4K-preset när en fil öppnas",
   "Choose an Anime4K preset": "Välj Anime4K-preset",
-  "Don't ask again": "Fråga inte igen"
+  "Don't ask again": "Fråga inte igen",
+  "default": "default",
+  "compact": "compact",
+  "spacious": "spacious"
 }

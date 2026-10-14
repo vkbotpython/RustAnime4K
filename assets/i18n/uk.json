@@ -89,5 +89,8 @@
   "Fixed multimedia control panel": "Фіксована панель керування мультимедіа",
   "Offer to choose an Anime4K preset when opening a file": "Пропонувати вибрати пресет Anime4K під час відкриття файлу",
   "Choose an Anime4K preset": "Виберіть пресет Anime4K",
-  "Don't ask again": "Більше не питати"
+  "Don't ask again": "Більше не питати",
+  "default": "default",
+  "compact": "compact",
+  "spacious": "spacious"
 }

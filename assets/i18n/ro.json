@@ -89,5 +89,8 @@
   "Fixed multimedia control panel": "Panou multimedia fix",
   "Offer to choose an Anime4K preset when opening a file": "Propune un preset Anime4K la deschiderea fișierului",
   "Choose an Anime4K preset": "Alege un preset Anime4K",
-  "Don't ask again": "Nu mai întreba"
+  "Don't ask again": "Nu mai întreba",
+  "default": "default",
+  "compact": "compact",
+  "spacious": "spacious"
 }
