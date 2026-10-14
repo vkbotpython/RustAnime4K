@@ -77,7 +77,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libgl1-mesa-dev \
-            libmpv-dev patchelf
+            libmpv-dev patchelf rpm
 
       - name: Prepare libmpv (Windows)
         if: runner.os == 'Windows'
@@ -202,7 +202,8 @@ jobs:
           if ldd dist/anime4k-player/anime4k-player | grep -q 'not found'; then
             echo 'ERROR: missing shared libraries'; exit 1
           fi
-          tar -czf anime4k-player-linux-x86_64.tar.gz -C dist anime4k-player
+          # Системные пакеты .deb/.rpm вместо portable-архива.
+          bash packaging/linux/mkpackages.sh
 
       - uses: actions/upload-artifact@v7
         if: runner.os == 'Windows'
@@ -219,5 +220,11 @@ jobs:
       - uses: actions/upload-artifact@v7
         if: runner.os == 'Linux'
         with:
-          name: anime4k-player-Linux
-          path: anime4k-player-linux-x86_64.tar.gz
+          name: anime4k-player-Linux-deb
+          path: anime4k-player-linux-x86_64.deb
+
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'Linux'
+        with:
+          name: anime4k-player-Linux-rpm
+          path: anime4k-player-linux-x86_64.rpm

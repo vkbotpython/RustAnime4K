@@ -107,9 +107,9 @@ src/
   theme.rs     палитры + тема + стили egui
 build.rs       иконка exe через winres (только Windows)
 build.ps1      локальная сборка Windows (проверки + release + dist + -Installer/-Zip)
-build.sh       локальная сборка Linux (проверки + release + dist + --installer)
+build.sh       локальная сборка Linux (проверки + release + dist + .deb/.rpm)
 assets/        shaders/ images/ docs/ favicon.ico + i18n/*.json
-packaging/     windows/installer.iss (Inno Setup: лицензия, каталог, ярлыки) + linux/.desktop
+packaging/     windows/installer.iss (Inno Setup: лицензия, каталог, ярлыки) + linux/{.desktop, mkpackages.sh (.deb/.rpm)}
 .github/       workflows/ci.yml + release.yml
 ```
 
@@ -158,10 +158,18 @@ packaging/     windows/installer.iss (Inno Setup: лицензия, катало
 ```
 
 ```bash
-./build.sh              # всё сразу (нужны libmpv-dev; для пакета — patchelf)
-./build.sh --installer  # + install.sh в пакете: согласие с LICENSE, выбор каталога,
-                        #   ярлык в меню приложений, ссылка в ~/.local/bin
+./build.sh              # всё сразу (нужны libmpv-dev; для пакета — patchelf,
+                        #   dpkg-deb и rpmbuild: sudo apt install rpm)
 ./build.sh --no-video --no-package
+```
+
+Пакет Linux — системные `anime4k-player-linux-x86_64.deb` (apt) и
+`anime4k-player-linux-x86_64.rpm` (dnf) в корне репо: `/opt/anime4k-player`
++ симлинк `/usr/bin/anime4k-player` + ярлык + иконка. Установка:
+
+```bash
+sudo apt install ./anime4k-player-linux-x86_64.deb  # Debian/Ubuntu
+sudo dnf install ./anime4k-player-linux-x86_64.rpm  # Fedora
 ```
 
 Windows, фича `video`: для линковки используется `mpvlib-local/mpv.lib`
@@ -210,7 +218,7 @@ cargo run --features video
 
 ### 📦 Самодостаточность сборки
 
-Релизные архивы не требуют ничего доустанавливать в систему (проверено:
+Релизные пакеты не требуют ничего доустанавливать в систему (проверено:
 `dumpbin /dependents`, аудит `DT_NEEDED`, CI гоняет `ldd` + запуск `--help`):
 
 - Windows: только системные DLL (`kernel32`, `user32`, `opengl32`, …),
@@ -219,7 +227,7 @@ cargo run --features video
 - Linux: бинарь линкуется только с glibc; X11/Wayland/OpenGL подхватываются
   в рантайме через `dlopen` — достаточно десктопной сессии с Mesa-драйверами.
   Приватные зависимости (`libmpv.so`, ffmpeg-цепочка) лежат в `lib/` рядом
-  с бинарником (RPATH `$ORIGIN`).
+  с бинарником (`/opt/anime4k-player/lib`, RPATH `$ORIGIN`).
 - Windows: `libmpv-2.dll` едет в архиве и ставится инсталлятором.
 - Релизы собираются с `--features video`: отдельный системный libmpv не нужен.
 
@@ -245,7 +253,10 @@ audio-delay=0.15
   (`anime4k-player-windows-x86_64.zip`) и `anime4k-player-Windows-setup`
   (`anime4k-player-windows-x86_64-setup.exe`, визард: согласие
   с лицензией, выбор каталога, ярлыки, ассоциации файлов);
-  Linux — `anime4k-player-Linux` (`anime4k-player-linux-x86_64.tar.gz`).
+  Linux — два отдельных артефакта: `anime4k-player-Linux-deb`
+  (`anime4k-player-linux-x86_64.deb`, `sudo apt install ./....deb`)
+  и `anime4k-player-Linux-rpm` (`anime4k-player-linux-x86_64.rpm`,
+  `sudo dnf install ./....rpm`).
 - `release.yml`: dormant, срабатывает только по тегу `v*` (сборка релизных
   бинарников + Inno Setup + публикация GitHub Release).
 

@@ -12,6 +12,11 @@ target/
 # Logs and local packaging output
 *.log
 dist/
+pkgroot/
+.rpmbuild/
+.mpv-dl/
+anime4k-player-linux-x86_64.*
+anime4k-player-windows-x86_64.*
 packaging/windows/Output/
 
 # Local libmpv import lib (regenerate via release.yml procedure / README)

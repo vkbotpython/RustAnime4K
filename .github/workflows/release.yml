@@ -18,7 +18,6 @@ jobs:
           - os: windows-latest
             archive: anime4k-player-windows-x86_64.zip
           - os: ubuntu-22.04
-            archive: anime4k-player-linux-x86_64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -30,7 +29,7 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
             libxkbcommon-dev libxkbcommon-x11-dev libgl1-mesa-dev \
-            libmpv-dev patchelf
+            libmpv-dev patchelf rpm
 
       - name: Prepare libmpv (Windows)
         if: runner.os == 'Windows'
@@ -152,15 +151,26 @@ jobs:
           if ldd dist/anime4k-player/anime4k-player | grep -q 'not found'; then
             echo 'ERROR: missing shared libraries'; exit 1
           fi
-          tar -czf ${{ matrix.archive }} -C dist anime4k-player
+          # Системные пакеты .deb/.rpm вместо portable-архива.
+          bash packaging/linux/mkpackages.sh
 
-      - name: Upload build artifacts
+      - name: Upload build artifacts (Windows)
+        if: runner.os == 'Windows'
         uses: actions/upload-artifact@v7
         with:
           name: release-${{ runner.os }}
           path: |
             ${{ matrix.archive }}
             dist/*.exe
+
+      - name: Upload build artifacts (Linux)
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ runner.os }}
+          path: |
+            anime4k-player-linux-x86_64.deb
+            anime4k-player-linux-x86_64.rpm
 
   publish:
     name: publish GitHub Release
