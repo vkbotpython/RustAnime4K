@@ -27,29 +27,33 @@
 - Открытие файла / URL / папки, плейлист, drag & drop (субтитры подхватываются сами,
   symlink открывается как URL), заголовок окна = имя файла
 - Пресеты Anime4K: качества S/M/L/VL/UL × режимы A/B/C/A+A/B+B/C+A + набор HQ,
-  генератор `mpv.conf` для Android, структурированная справка (EN/RU):
+  генератор строки `glsl-shaders=` для Android, структурированная справка (EN/RU):
   карточки режимов, таблицы конвейеров и шейдеров, рекомендации
 - **Диалог выбора пресета при старте видео**: выбрать пресет или полностью
   отключить; выбор **запоминается для каждого файла** (`filePresets`
   в конфиге) и молча применяется при повторном открытии. Отключить предложение
   можно в диалоге («Больше не спрашивать») или в настройках
 - Воспроизведение: играть/пауза, **ползунок перемотки во всю ширину окна**
-  (точность ×10, шаг 0.5 с), скорость 0.25–3.0, масштаб, громкость 100/150%,
-  меню аудио- и субтитровых дорожек, автопереход к следующему файлу в конце,
-  поддержка URL через `ytdl`
+  (точность 0.1 с), скорость 0.25–3.0 (12 ступеней в меню), масштаб ±0.01,
+  громкость 100/150%, меню аудио- и субтитровых дорожек + подключение внешних
+  файлов, строка медиа-инфо (кодек, разрешение, FPS, потери кадров, HW-декодер),
+  автопереход к следующему файлу в конце, поддержка URL через `ytdl`
 - Мышь: клик по видео — играть/пауза, дабл-клик — fullscreen, правый клик —
   контекстное меню. В fullscreen панели и курсор автоматически прячутся
   (если не включена фиксированная панель)
 - Горячие клавиши (см. таблицу ниже)
-- Режим SVP (`mpvpipe` + `auto-copy`), задержка звука −100…+100 с, скриншоты
+- Режим SVP (`mpvpipe` + `auto-copy`), задержка звука −100…+100 с (шаг 0.01),
+  скриншоты JPEG q100 в выбранную папку, диагностика `mpv.log` рядом с exe
+  (ротация 512 КБ)
 - Аппаратное декодирование (`hwdec=auto-safe` с откатом на софт) — в релизных
   сборках libmpv уже включён: на Linux лежит в `lib/` рядом с бинарником,
   на Windows `libmpv-2.dll` рядом с exe
 - 25 языков (автоопределение + ручной выбор), 5 палитр ×
   системная/светлая/тёмная схема, 3 стиля интерфейса, вставка из буфера обмена
   (кнопки Paste) во всех диалогах
-- Восстановление сессии (последний файл/URL/папка + позиция ≥ 10 с, + сохранённый
-  пресет файла), параметры запуска, «О программе» с иконкой, чипами стека,
+- Восстановление сессии (последний файл/URL/папка + позиция ≥ 10 с, сохранённый
+  пресет файла, геометрия окна, громкость, SVP/сдвиг звука/параметры запуска),
+  параметры запуска, «О программе» с иконкой, чипами стека,
   соцсетями (YouTube/Telegram/VK/Дзен/GitHub) и донатом с подтверждением копирования
 - Windows: без консольного окна, иконка вшита в exe (`build.rs` + winres)
   и в заголовок окна
@@ -85,8 +89,9 @@ src/
     session.rs   восстановление сессии и сохранение при выходе
     input.rs     горячие клавиши, мышь, fullscreen, drag & drop
     views.rs     меню, видео, транспорт, треки, плейлист
-    dialogs/    9 диалогов: settings, about, open (URL/папка),
-                screenshot, launch, android, help, preset_offer
+    dialogs/    9 диалоговых окон в 8 модулях + mod/ui_kit: settings, about,
+                open (URL + папка — 2 окна), screenshot, launch, android,
+                help, preset_offer; ui_kit — общие карточки/плашки диалогов
   player.rs    логика плейлиста/громкости
   mpv/         управление mpv
     mod.rs       трейт MpvBackend + Track/TrackKind
@@ -101,6 +106,7 @@ src/
   formats.rs   расширения медиафайлов
   playlist.rs  сканирование папок
   reference/   справка Anime4K (EN/RU)
+    mod.rs       реэкспорты + точка входа справки
     view.rs      секции: шапка, выбор, режимы, тонкая настройка, советы
     data.rs      режимы, шейдеры, конвейеры
     widgets.rs   карточки, бейджи, секции
@@ -108,8 +114,11 @@ src/
 build.rs       иконка exe через winres (только Windows)
 build.ps1      локальная сборка Windows (проверки + release + dist + -Installer/-Zip)
 build.sh       локальная сборка Linux (проверки + release + dist + .deb/.rpm)
-assets/        shaders/ images/ docs/ favicon.ico + i18n/*.json
-packaging/     windows/installer.iss (Inno Setup: лицензия, каталог, ярлыки) + linux/{.desktop, mkpackages.sh (.deb/.rpm)}
+assets/        shaders/ (49 .glsl) + images/ (иконка, play) + docs/ (2 .txt) +
+               favicon.ico + i18n/*.json (25 языков)
+packaging/     windows/installer.iss (Inno Setup: лицензия, каталог, ярлыки) +
+               linux/{io.github.avencores.Anime4KPlayer.desktop, mkpackages.sh (.deb/.rpm)}
+.cargo/config.toml + mpvlib-local/mpv.lib  единственный источник `-L` для линковки libmpv
 .github/       workflows/ci.yml + release.yml
 ```
 
@@ -119,10 +128,15 @@ packaging/     windows/installer.iss (Inno Setup: лицензия, катало
 
 ## ⚙️ Конфиг (`config.json`)
 
+Лежит в `%APPDATA%/Anime4K Player/config.json` (Windows) или
+`~/.config/Anime4K Player/config.json` (Linux).
+
 Рядом с остальными ключами (`volume`, `language`, `palette`, `style`,
 `colorScheme`, `soundOffset`, `SVP`, `volumePlus`, `onOpenLastFile`,
 `onPosLastFile`, `fixedControlPanel`, `opened`, `file`, `position`,
-`linksHistory`, `foldersHistory`, `launchParameters`) хранятся:
+`linksHistory`, `foldersHistory`, `launchParameters`, `screenshotDirectory`,
+`androidPath`, `windowX`, `windowY`, `windowW`, `windowH`, `windowMaximized`)
+хранятся:
 
 - `askPresetOnOpen` — предлагать ли выбор пресета при старте видео (default `true`)
 - `filePresets` — пресет для каждого файла:
@@ -158,8 +172,8 @@ packaging/     windows/installer.iss (Inno Setup: лицензия, катало
 ```
 
 ```bash
-./build.sh              # всё сразу (нужны libmpv-dev; для пакета — patchelf,
-                        #   dpkg-deb и rpmbuild: sudo apt install rpm)
+./build.sh              # всё сразу (нужен libmpv-dev + xcb/xkb/GL-dev, см. build.sh;
+                        #   для пакета — patchelf, dpkg-deb и rpmbuild: sudo apt install rpm)
 ./build.sh --no-video --no-package
 ```
 
@@ -181,7 +195,7 @@ Windows, фича `video`: для линковки используется `mpv
 можно запускать прямо оттуда.
 
 ```powershell
-cargo test            # 31 юнит-тест (системные зависимости не нужны)
+cargo test            # 35 юнит-тестов (системные зависимости не нужны)
 cargo run             # debug-сборка, mock-бэкенд (UI полностью работает, без декодирования)
 cargo run -- <файл>   # открыть файл/папку/URL напрямую
 ```
@@ -245,8 +259,8 @@ audio-delay=0.15
 
 ## 🚀 CI / релизы
 
-- `ci.yml`: `fmt --check` + `clippy -D warnings` + `cargo test` на
-  Windows + Linux; плюс `cargo check/test --features video` на Linux.
+- `ci.yml`: `fmt --check` + `clippy -D warnings` + `cargo check/clippy --features video`
+  + `cargo test` на Windows + Linux; плюс `cargo test --features video` на Linux.
   Джоба `build-release` собирает `--features video` с бандлингом libmpv —
   её артефакты и есть рабочий плеер, качать из вкладки Actions:
   Windows — два отдельных артефакта: `anime4k-player-Windows-portable`
