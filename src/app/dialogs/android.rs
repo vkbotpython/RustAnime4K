@@ -5,7 +5,7 @@ use crate::app::state::Anime4KPlayerApp;
 use crate::i18n::Lang;
 use serde_json::json;
 
-use super::ui_kit::{card, field_title, hint, para, text_field};
+use super::ui_kit::{card, card_fill, field_title, hint, para, text_field};
 
 impl Anime4KPlayerApp {
     pub(crate) fn android_dialog(&mut self, ctx: &egui::Context) {
@@ -102,20 +102,31 @@ impl Anime4KPlayerApp {
                 let single = anime4k::create_preset(&quality, &mode)
                     .map(|p| anime4k::android_config_line(&p, &self.android_path.clone()))
                     .unwrap_or_default();
-                card(ui, |ui| {
-                    field_title(ui, "mpv.conf");
-                    // No auto-shrink: otherwise the window snaps back to content
-                    // height on release and vertical resize is impossible.
-                    // max_height is mandatory here: without it the scroll area
-                    // claims all available space, the window grows after it,
-                    // and the loop stretches the dialog infinitely downwards.
-                    egui::ScrollArea::both()
-                        .max_height(220.0)
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            ui.monospace(format!("# {selected_text}\n{single}"));
-                        });
-                });
+                // Same look as `card()`, but with NO trailing space: this
+                // fill-sized card is the last element of an auto-sized
+                // window, and any widget after the fill (even 6px of space)
+                // makes the content larger than the window every frame, so
+                // the window grows without bound.
+                egui::Frame::new()
+                    .fill(card_fill(ui))
+                    .inner_margin(10.0)
+                    .corner_radius(8.0)
+                    .stroke(egui::Stroke::new(
+                        1.0,
+                        ui.visuals().widgets.noninteractive.bg_stroke.color,
+                    ))
+                    .show(ui, |ui| {
+                        field_title(ui, "mpv.conf");
+                        // Fill, don't cap: the scroll area takes exactly the
+                        // remaining window space, so the window is stable on
+                        // open and follows a manual resize (a `max_height`
+                        // cap makes a taller drag snap back on release).
+                        egui::ScrollArea::both()
+                            .auto_shrink([false, false])
+                            .show(ui, |ui| {
+                                ui.monospace(format!("# {selected_text}\n{single}"));
+                            });
+                    });
             });
         // The path field has no Save button (actions only copy to the
         // clipboard): remember it on close so it survives a restart.
