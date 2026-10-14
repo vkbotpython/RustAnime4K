@@ -76,19 +76,24 @@ fn main() -> eframe::Result<()> {
     let mut viewport = egui::ViewportBuilder::default()
         .with_title(APP_NAME)
         .with_min_inner_size([800.0, 600.0])
-        .with_inner_size(size)
         .with_icon(load_app_icon());
     if maximized {
+        // Maximized restore must NOT carry an explicit size/position: the
+        // stored W/H is the last *windowed* rect, and combining it with
+        // maximized leaves a broken quarter-screen window (winit quirk).
         viewport = viewport.with_maximized(true);
-    } else if let (Some(x), Some(y)) = (num("windowX"), num("windowY"))
-        && x.is_finite()
-        && y.is_finite()
-        && x > -10000.0
-        && x < 10000.0
-        && y > -10000.0
-        && y < 10000.0
-    {
-        viewport = viewport.with_position([x as f32, y as f32]);
+    } else {
+        viewport = viewport.with_inner_size(size);
+        if let (Some(x), Some(y)) = (num("windowX"), num("windowY"))
+            && x.is_finite()
+            && y.is_finite()
+            && x > -10000.0
+            && x < 10000.0
+            && y > -10000.0
+            && y < 10000.0
+        {
+            viewport = viewport.with_position([x as f32, y as f32]);
+        }
     }
 
     let options = eframe::NativeOptions {
