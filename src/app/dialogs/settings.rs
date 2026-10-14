@@ -189,17 +189,20 @@ impl Anime4KPlayerApp {
                                 });
                             ui.end_row();
                             ui.label(style_label);
-                            egui::ComboBox::from_id_salt("qstyle")
-                                .selected_text(self.settings_style.clone())
-                                .show_ui(ui, |ui| {
-                                    for name in crate::theme::style::all_names() {
-                                        ui.selectable_value(
-                                            &mut self.settings_style,
-                                            (*name).to_string(),
-                                            *name,
-                                        );
-                                    }
-                                });
+                            // Three fixed options: inline selectables instead
+                            // of a ComboBox. A popup is capped by
+                            // `combo_height` and the space below the widget,
+                            // so in the spacious style the third row ended up
+                            // cut off with a scrollbar.
+                            ui.horizontal(|ui| {
+                                for name in crate::theme::style::all_names() {
+                                    ui.selectable_value(
+                                        &mut self.settings_style,
+                                        (*name).to_string(),
+                                        *name,
+                                    );
+                                }
+                            });
                             ui.end_row();
                         });
                 });
