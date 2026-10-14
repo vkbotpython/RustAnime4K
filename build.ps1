@@ -93,7 +93,25 @@ function Install-MpvDev {
   $dlDir = Join-Path $RepoRoot '.mpv-dl'
   New-Item -ItemType Directory -Force $dlDir | Out-Null
   Step 'Скачивание mpv-dev (shinchiro/mpv-winbuild-cmake)'
-  $rel = Invoke-RestMethod 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest'
+  # Анонимный лимит GitHub API (60/ч с одного IP) легко исчерпать за общим
+  # NAT: если в окружении есть GITHUB_TOKEN/GH_MPV_TOKEN — шлём его
+  # (лимит на порядок выше). Плюс ретраи при временных ошибках.
+  $headers = @{}
+  foreach ($tokVar in @('GITHUB_TOKEN', 'GH_MPV_TOKEN')) {
+    $tok = [Environment]::GetEnvironmentVariable($tokVar)
+    if (($tok -ne $null) -and ($tok -ne "")) { $headers['Authorization'] = "Bearer $tok"; break }
+  }
+  $rel = $null
+  for ($attempt = 1; $attempt -le 5; $attempt++) {
+    try {
+      $rel = Invoke-RestMethod 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest' -Headers $headers
+      break
+    } catch {
+      if ($attempt -ge 5) { throw }
+      Write-Host "GitHub API недоступен (попытка $attempt/5), жду $($attempt * 15) c..."
+      Start-Sleep -Seconds ($attempt * 15)
+    }
+  }
   $asset = @($rel.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-\d.*\.7z$' })[0]
   if (-not $asset) { throw 'libmpv archive not found in latest mpv release' }
   $sevenZ = Join-Path $dlDir 'mpv.7z'

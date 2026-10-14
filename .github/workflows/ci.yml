@@ -82,11 +82,28 @@ jobs:
       - name: Prepare libmpv (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          GH_MPV_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           # Official mpv builds ship libmpv-2.dll (in the mpv-dev package)
           # but no import lib, so generate mpv.lib from the DLL exports.
           New-Item -ItemType Directory -Force mpvlib | Out-Null
-          $rel = Invoke-RestMethod 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest'
+          # Анонимные запросы к GitHub API с общих IP раннеров часто упираются
+          # в rate limit (60/ч): шлём GITHUB_TOKEN (лимит на порядок выше)
+          # и повторяем запрос при временных ошибках.
+          $headers = @{}
+          if ($env:GH_MPV_TOKEN -ne "") { $headers['Authorization'] = "Bearer $($env:GH_MPV_TOKEN)" }
+          $rel = $null
+          for ($attempt = 1; $attempt -le 5; $attempt++) {
+            try {
+              $rel = Invoke-RestMethod 'https://api.github.com/repos/shinchiro/mpv-winbuild-cmake/releases/latest' -Headers $headers
+              break
+            } catch {
+              if ($attempt -ge 5) { throw }
+              Write-Host "GitHub API недоступен (попытка $attempt/5), жду $($attempt * 15) c..."
+              Start-Sleep -Seconds ($attempt * 15)
+            }
+          }
           $asset = @($rel.assets | Where-Object { $_.name -match '^mpv-dev-x86_64-\d.*\.7z$' })[0]
           if (-not $asset) { throw 'libmpv archive not found in latest mpv release' }
           Invoke-WebRequest $asset.browser_download_url -OutFile mpv.7z
