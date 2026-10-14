@@ -113,7 +113,15 @@ pub mod style {
                 style.spacing.item_spacing = egui::vec2(10.0, 6.0);
                 style.spacing.menu_margin = egui::Margin::same(8);
             }),
-            _ => {}
+            // Default must reset whatever compact/spacious set before.
+            // Previously this branch was a no-op, so switching back to
+            // "default" kept the previous style's spacing.
+            _ => ctx.all_styles_mut(|style| {
+                let defaults = egui::Style::default();
+                style.spacing.button_padding = defaults.spacing.button_padding;
+                style.spacing.item_spacing = defaults.spacing.item_spacing;
+                style.spacing.menu_margin = defaults.spacing.menu_margin;
+            }),
         }
     }
 }
@@ -207,5 +215,40 @@ mod tests {
         assert_eq!(cream, egui::Color32::from_rgb(227, 223, 217));
         let near_black = card_fill_for(egui::Color32::from_rgb(0, 5, 250));
         assert_eq!(near_black, egui::Color32::from_rgb(18, 23, 255));
+    }
+
+    #[test]
+    fn default_style_resets_compact_and_spacious_spacing() {
+        let ctx = egui::Context::default();
+        let expected = egui::Style::default();
+        let spacing = || {
+            ctx.all_styles_mut(|_| {});
+            // Read back via style mutation probe: capture current values.
+            let mut current = None;
+            ctx.all_styles_mut(|s| {
+                current = Some((
+                    s.spacing.button_padding,
+                    s.spacing.item_spacing,
+                    s.spacing.menu_margin,
+                ));
+            });
+            current.expect("style must exist")
+        };
+
+        style::apply(&ctx, style::COMPACT);
+        assert_ne!(spacing().0, expected.spacing.button_padding);
+        style::apply(&ctx, style::DEFAULT);
+        assert_eq!(spacing(), {
+            (
+                expected.spacing.button_padding,
+                expected.spacing.item_spacing,
+                expected.spacing.menu_margin,
+            )
+        });
+
+        style::apply(&ctx, style::SPACIOUS);
+        assert_ne!(spacing().0, expected.spacing.button_padding);
+        style::apply(&ctx, style::DEFAULT);
+        assert_eq!(spacing().0, expected.spacing.button_padding);
     }
 }
