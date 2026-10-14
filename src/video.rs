@@ -8,7 +8,8 @@
 //! renderer is driven by **our** `Mpv` handle, so Anime4K `glsl-shaders`,
 //! track selection and every other property keep working on the same core.
 
-use std::ffi::{CString, c_void};
+use std::ffi::{CStr, CString, c_void};
+use std::os::raw::c_char;
 use std::sync::Arc;
 
 use eframe::glow::{self, HasContext as _};
@@ -18,6 +19,11 @@ use libmpv2::render::{
 };
 
 type GpaFn = dyn Fn(&str) -> *mut c_void + Send + Sync;
+
+/// Upper bound for the presentation FBO (~8.3MP = 4K). On wider displays
+/// (5K/8K) the FBO renders at 4K and the blit upscales with LINEAR: saves
+/// tens of MB VRAM for 480p-in-8K-window cases with no visible loss.
+const MAX_FBO_PIXELS: i64 = 3840 * 2160;
 
 /// Free function used as `OpenGLInitParams::get_proc_address`.
 fn resolve_gl_proc(gpa: &Arc<GpaFn>, name: &str) -> *mut c_void {
@@ -62,6 +68,21 @@ impl VideoRenderer {
             anyhow::anyhow!("get_proc_address unavailable despite glow being active")
         })?;
         let gpa: Arc<GpaFn> = Arc::new(move |name: &str| {
+            // Zero-alloc fast path: GL entry names are short ASCII, so a
+            // stack buffer avoids a `CString` heap alloc per lookup (dozens
+            // per shader compile). Falls back to `CString` for odd names.
+            let bytes = name.as_bytes();
+            if bytes.len() + 1 < 256 && !bytes.contains(&0) {
+                let mut buf = [0 as c_char; 256];
+                for (i, b) in bytes.iter().enumerate() {
+                    buf[i] = *b as c_char;
+                }
+                // SAFETY: `buf` is NUL-terminated by construction (`len+1 <
+                // 256`, rest zeros) and lives for the call; `get_proc_address`
+                // only reads it synchronously.
+                let cstr = unsafe { CStr::from_ptr(buf.as_ptr()) };
+                return proc_addr(cstr).cast_mut();
+            }
             CString::new(name)
                 .ok()
                 .map_or(std::ptr::null_mut(), |s| proc_addr(s.as_c_str()).cast_mut())
@@ -103,13 +124,23 @@ impl VideoRenderer {
     /// Renders the current frame (if any) and schedules the blit for `rect`.
     pub fn show(&mut self, ui: &mut egui::Ui, rect: egui::Rect) {
         let ppp = ui.ctx().pixels_per_point();
-        let size = FramebufferSize {
-            width: (rect.width() * ppp).floor() as i32,
-            height: (rect.height() * ppp).floor() as i32,
-        };
-        if size.width <= 0 || size.height <= 0 {
+        let mut w = (rect.width() * ppp).floor() as i32;
+        let mut h = (rect.height() * ppp).floor() as i32;
+        if w <= 0 || h <= 0 {
             return;
         }
+        // Cap VRAM: huge windows render at most 4K into the FBO; the blit
+        // below upscales to the full rect with LINEAR.
+        let pixels = w as i64 * h as i64;
+        if pixels > MAX_FBO_PIXELS {
+            let scale = (MAX_FBO_PIXELS as f64 / pixels as f64).sqrt();
+            w = ((w as f64 * scale).floor() as i32).max(1);
+            h = ((h as f64 * scale).floor() as i32).max(1);
+        }
+        let size = FramebufferSize {
+            width: w,
+            height: h,
+        };
 
         let (res, fresh) = match self.ensure_resources(size) {
             Ok(res) => res,

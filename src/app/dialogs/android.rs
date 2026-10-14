@@ -21,19 +21,22 @@ impl Anime4KPlayerApp {
         let selected_label = self.t("Selected");
         let all_label = self.t("All");
         let russian = self.lang == Lang::Russian;
-        let mut combos: Vec<(String, String, String)> = Vec::new();
-        for quality in anime4k::QUALITIES {
-            for mode in anime4k::MODES {
-                combos.push((
-                    format!("{} {mode} ({quality})", self.t("Mode")),
-                    quality.to_string(),
-                    mode.to_string(),
-                ));
-            }
-        }
-        if self.android_index >= combos.len() {
+        // No prebuilt `Vec<(String, String, String)>`: the old code allocated
+        // ~45 `String` every frame even with the dropdown closed. Qualities
+        // and modes are `&'static str`; labels are formatted on demand only
+        // for the visible rows.
+        let combo_count = anime4k::QUALITIES.len() * anime4k::MODES.len();
+        if self.android_index >= combo_count {
             self.android_index = 0;
         }
+        let mode_word: &'static str = self.t("Mode");
+        let combo_parts = |idx: usize| -> (&'static str, &'static str) {
+            let modes = anime4k::MODES.len();
+            (anime4k::QUALITIES[idx / modes], anime4k::MODES[idx % modes])
+        };
+        let (sel_q, sel_m) = combo_parts(self.android_index);
+        // One label for the closed combo instead of N per frame.
+        let selected_label_text = format!("{mode_word} {sel_m} ({sel_q})");
         let mut open = self.show_android;
         egui::Window::new(title)
             .open(&mut open)
@@ -55,31 +58,34 @@ impl Anime4KPlayerApp {
                 card(ui, |ui| {
                     field_title(ui, preset_label);
                     egui::ComboBox::from_id_salt("android-preset")
-                        .selected_text(&combos[self.android_index].0)
+                        .selected_text(selected_label_text.as_str())
                         .show_ui(ui, |ui| {
-                            for (i, (label, _, _)) in combos.iter().enumerate() {
-                                ui.selectable_value(&mut self.android_index, i, label);
+                            for i in 0..combo_count {
+                                let (q, m) = combo_parts(i);
+                                ui.selectable_value(
+                                    &mut self.android_index,
+                                    i,
+                                    format!("{mode_word} {m} ({q})"),
+                                );
                             }
                         });
                     ui.add_space(4.0);
                     ui.horizontal_wrapped(|ui| {
                         if ui.button(selected_label).clicked() {
-                            let selected_text = combos[self.android_index].0.clone();
-                            let quality = combos[self.android_index].1.clone();
-                            let mode = combos[self.android_index].2.clone();
-                            let single = anime4k::create_preset(&quality, &mode)
-                                .map(|p| {
-                                    anime4k::android_config_line(&p, &self.android_path.clone())
-                                })
+                            let (q, m) = combo_parts(self.android_index);
+                            let selected_text = format!("{mode_word} {m} ({q})");
+                            let single = anime4k::create_preset(q, m)
+                                .map(|p| anime4k::android_config_line(&p, &self.android_path))
                                 .unwrap_or_default();
                             ui.ctx().copy_text(format!("# {selected_text}\n{single}"));
                         }
                         if ui.button(all_label).clicked() {
                             let mut blocks = Vec::new();
-                            for (label, q, m) in &combos {
+                            for i in 0..combo_count {
+                                let (q, m) = combo_parts(i);
                                 if let Ok(p) = anime4k::create_preset(q, m) {
                                     blocks.push(format!(
-                                        "# {label}\n# {}",
+                                        "# {mode_word} {m} ({q})\n# {}",
                                         anime4k::android_config_line(&p, &self.android_path)
                                     ));
                                 }
@@ -96,12 +102,11 @@ impl Anime4KPlayerApp {
                         },
                     );
                 });
-                let selected_text = combos[self.android_index].0.clone();
-                let quality = combos[self.android_index].1.clone();
-                let mode = combos[self.android_index].2.clone();
-                let single = anime4k::create_preset(&quality, &mode)
-                    .map(|p| anime4k::android_config_line(&p, &self.android_path.clone()))
+                let (quality, mode) = combo_parts(self.android_index);
+                let single = anime4k::create_preset(quality, mode)
+                    .map(|p| anime4k::android_config_line(&p, &self.android_path))
                     .unwrap_or_default();
+                let selected_text = format!("{mode_word} {mode} ({quality})");
                 // Same look as `card()`, but with NO trailing space: this
                 // fill-sized card is the last element of an auto-sized
                 // window, and any widget after the fill (even 6px of space)

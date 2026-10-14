@@ -51,7 +51,8 @@ impl Anime4KPlayerApp {
                 ui.horizontal(|ui| {
                     if ui.button(apply_label).clicked() {
                         let mut ok = true;
-                        for (name, value) in parse_launch_params(&self.launch_params_text.clone()) {
+                        // Borrow, don't clone the whole draft for parsing.
+                        for (name, value) in parse_launch_params(&self.launch_params_text) {
                             if name == "volume" {
                                 if let Ok(v) = value.parse::<i32>() {
                                     self.player.set_volume(&*self.mpv, v);

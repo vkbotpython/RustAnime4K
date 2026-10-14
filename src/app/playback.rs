@@ -100,6 +100,17 @@ impl Anime4KPlayerApp {
             .map(|p| p.to_string_lossy().into_owned())
     }
 
+    /// Compares the current file key without allocating: `to_string_lossy`
+    /// borrows for valid UTF-8 paths, so the common "same file" poll tick
+    /// costs zero heap allocs (was: one full-path `String` every 100ms).
+    pub(crate) fn current_file_key_matches(&self, other: &Option<String>) -> bool {
+        match (self.player.current_file(), other) {
+            (None, None) => true,
+            (Some(p), Some(o)) => p.to_string_lossy().as_ref() == o.as_str(),
+            _ => false,
+        }
+    }
+
     pub(crate) fn read_file_preset(&self, key: &str) -> Option<PresetChoice> {
         self.config
             .get("filePresets")?
@@ -254,8 +265,8 @@ impl Anime4KPlayerApp {
         // Static tier: properties that never change within one file.
         // Right after `loadfile` they read back as `None`: keep the key
         // unset so the next tick retries instead of caching `None`s.
-        let key = self.current_file_key();
-        if key != self.snap_static_key {
+        // Allocation-free check: the key is cloned only when it changed.
+        if !self.current_file_key_matches(&self.snap_static_key) {
             self.snap.video_format = self.mpv.video_format();
             self.snap.audio_codec = self.mpv.audio_codec();
             self.snap.width = self.mpv.width();
@@ -263,7 +274,7 @@ impl Anime4KPlayerApp {
             self.snap.fps = self.mpv.fps();
             self.snap.hwdec = self.mpv.hwdec_current();
             if self.snap.duration.is_some() {
-                self.snap_static_key = key.clone();
+                self.snap_static_key = self.current_file_key();
             }
         }
         // Slow tier: counters/flags nobody needs at 10 Hz.
@@ -280,7 +291,9 @@ impl Anime4KPlayerApp {
         // The last list is kept otherwise (no per-tick clear).
         if self.show_audio_menu || self.show_sub_menu {
             let count = self.mpv.track_count();
-            if self.tracks_file_key != key || self.tracks_count_cache != Some(count) {
+            if !self.current_file_key_matches(&self.tracks_file_key)
+                || self.tracks_count_cache != Some(count)
+            {
                 let tracks = self.mpv.tracks();
                 // Full labels are prebuilt once per refetch: the menu only
                 // iterates `&str` afterwards (zero per-frame `format!`).
@@ -302,7 +315,7 @@ impl Anime4KPlayerApp {
                     .collect();
                 self.snap.tracks = tracks;
                 self.tracks_count_cache = Some(count);
-                self.tracks_file_key = key;
+                self.tracks_file_key = self.current_file_key();
             }
         }
     }

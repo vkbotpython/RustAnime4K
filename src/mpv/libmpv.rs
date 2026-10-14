@@ -59,8 +59,17 @@ impl LibMpv {
             let _ = init.set_option("ytdl", "yes");
             // Render API mode: frames go to our egui surface (see video.rs).
             init.set_option("vo", "libmpv")?;
-            // Hardware decoding with software fallback.
+            // Hardware decoding with software fallback (zero-copy path;
+            // `auto-copy` is only forced while SVP needs CPU frames).
             init.set_option("hwdec", "auto-safe")?;
+            // Bounded demuxer/cache: mpv defaults keep tens of MB queued and
+            // a stalled network seek can spike RAM. These caps keep playback
+            // smooth yet bounded; power users can still override them via
+            // Launch parameters (`cache-secs=...`, `demuxer-max-bytes=...`).
+            let _ = init.set_option("cache-secs", "120");
+            let _ = init.set_option("demuxer-max-bytes", "150M");
+            let _ = init.set_option("demuxer-max-back-bytes", "50M");
+            let _ = init.set_option("demuxer-readahead-secs", "60");
             Ok(())
         })?;
         Ok(Self {
@@ -146,7 +155,10 @@ impl MpvBackend for LibMpv {
         self.inner
             .set_property("screenshot-directory", dir.to_string())
             .map_err(|e| anyhow::anyhow!("mpv screenshot-directory failed: {e}"))?;
-        let _ = self.inner.set_property("screenshot-jpeg-quality", 100_i64);
+        // q90 instead of q100: ~5-10x smaller files and RAM spike on 4K
+        // captures for a visually lossless result. q100 is still available
+        // via Launch parameters (`screenshot-jpeg-quality=100`).
+        let _ = self.inner.set_property("screenshot-jpeg-quality", 90_i64);
         Ok(())
     }
     fn set_audio_delay(&self, delay: f64) {
@@ -157,12 +169,15 @@ impl MpvBackend for LibMpv {
             let _ = self
                 .inner
                 .set_property("input-ipc-server", "mpvpipe".to_string());
+            // `auto-copy` is mandatory here: interpolation needs CPU frames,
+            // hence one VRAM->RAM copy (+bandwidth on 4K). Off means back to
+            // zero-copy `auto-safe`.
             let _ = self.inner.set_property("hwdec", "auto-copy".to_string());
             let _ = self.inner.set_property("hwdec-codecs", "all".to_string());
             let _ = self.inner.set_property("hr-seek-framedrop", false);
         } else {
             let _ = self.inner.set_property("input-ipc-server", String::new());
-            let _ = self.inner.set_property("hwdec", "auto".to_string());
+            let _ = self.inner.set_property("hwdec", "auto-safe".to_string());
             let _ = self.inner.set_property("hr-seek-framedrop", true);
         }
     }

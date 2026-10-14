@@ -41,7 +41,7 @@ impl Anime4KPlayerApp {
                     ui.add(
                         egui::Image::from_bytes(
                             "bytes://anime4k-player-icon",
-                            include_bytes!("../../../assets/images/anime4k-player-icon.png"),
+                            crate::icon::ICON_PNG,
                         )
                         .max_width(96.0),
                     );

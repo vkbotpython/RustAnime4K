@@ -159,8 +159,14 @@ impl PlayerState {
     pub fn close(&mut self, mpv: &dyn MpvBackend) {
         mpv.stop();
         self.files.clear();
+        self.files.shrink_to_fit();
+        self.filenames_cache.clear();
+        self.filenames_cache.shrink_to_fit();
         self.current = None;
         self.preset_name.clear();
+        self.preset_name.shrink_to_fit();
+        self.last_glsl_shaders.clear();
+        self.last_glsl_shaders.shrink_to_fit();
         self.mark_files_changed();
     }
 

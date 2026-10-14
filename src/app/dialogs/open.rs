@@ -3,10 +3,15 @@
 use crate::app::helpers::read_clipboard_text;
 use crate::app::state::Anime4KPlayerApp;
 use crate::i18n::Lang;
-use serde_json::{Value, json};
+use serde_json::json;
 use std::path::Path;
 
 use super::ui_kit::{bottom_bar, card, field_title, hint, text_field};
+
+/// Upper bound for URL/folder MRU histories. `filePresets` already has
+/// `MAX_FILE_PRESETS=500`; these two arrays had no cap and were cloned
+/// whole every frame while the dialog was open, so they grew without bound.
+pub(crate) const MAX_HISTORY_ENTRIES: usize = 100;
 
 impl Anime4KPlayerApp {
     pub(crate) fn open_url_dialog(&mut self, ctx: &egui::Context) {
@@ -23,6 +28,9 @@ impl Anime4KPlayerApp {
         let mut open = self.show_open_url;
         let mut chosen: Option<String> = None;
         let mut cancelled = false;
+        // Bounded clone: storage is capped at `MAX_HISTORY_ENTRIES` on every
+        // write (see `push_history_capped`), so this per-frame copy stays
+        // ~10KB instead of growing without limit.
         let history = self
             .config
             .get("linksHistory")
@@ -83,10 +91,13 @@ impl Anime4KPlayerApp {
                     if ui.button(go).clicked() {
                         let link = self.url_text.trim().to_string();
                         if !link.is_empty() {
-                            let mut updated = history.clone();
-                            updated.retain(|v| v.as_str() != Some(link.as_str()));
-                            updated.insert(0, Value::String(link.clone()));
-                            self.config.set("linksHistory", Value::Array(updated));
+                            // In-place MRU update, capped — no whole-array
+                            // clone/retain/insert without `truncate`.
+                            self.config.push_history_capped(
+                                "linksHistory",
+                                &link,
+                                MAX_HISTORY_ENTRIES,
+                            );
                             self.flush_config();
                             chosen = Some(link);
                         }
@@ -122,6 +133,7 @@ impl Anime4KPlayerApp {
         let mut open = self.show_open_folder;
         let mut chosen: Option<String> = None;
         let mut cancelled = false;
+        // Bounded clone, same as the URL dialog above.
         let history = self
             .config
             .get("foldersHistory")
@@ -199,10 +211,11 @@ impl Anime4KPlayerApp {
                     if ui.button(go).clicked() {
                         let folder = self.folder_text.trim().to_string();
                         if !folder.is_empty() {
-                            let mut updated = history.clone();
-                            updated.retain(|v| v.as_str() != Some(folder.as_str()));
-                            updated.insert(0, Value::String(folder.clone()));
-                            self.config.set("foldersHistory", Value::Array(updated));
+                            self.config.push_history_capped(
+                                "foldersHistory",
+                                &folder,
+                                MAX_HISTORY_ENTRIES,
+                            );
                             self.flush_config();
                             chosen = Some(folder);
                         }
@@ -235,8 +248,11 @@ impl Anime4KPlayerApp {
         empty_hint: &str,
         target: &mut String,
     ) {
-        let items: Vec<&str> = items.collect();
-        if items.is_empty() {
+        // No `Vec<&str>` collect: the old version allocated O(N) pointers
+        // every frame while the dialog was open. `Peekable` checks emptiness
+        // without any allocation.
+        let mut items = items.peekable();
+        if items.peek().is_none() {
             hint(ui, empty_hint);
             return;
         }

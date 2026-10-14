@@ -163,6 +163,16 @@ pub struct Anime4KPlayerApp {
     /// frame; the cache rebuilds only when snapshot inputs change.
     pub(crate) media_info_cache: String,
     pub(crate) media_info_sig: Option<MediaInfoSig>,
+    /// Cached `MM:SS` labels for the seek bar. `fmt_time` allocates 2
+    /// `String` per frame at 60fps; the cache rebuilds only when the
+    /// displayed second changes (position is quantized to 0.1s).
+    pub(crate) time_pos_text: String,
+    pub(crate) time_dur_text: String,
+    pub(crate) time_pos_tick: i64,
+    pub(crate) time_dur_tick: i64,
+    /// Cached `"{vol}%"` label: rebuilt only when the volume changes.
+    pub(crate) volume_text: String,
+    pub(crate) volume_text_vol: i32,
 }
 
 /// Fingerprint of `media_info()` inputs. Any change means the row must be
@@ -386,6 +396,12 @@ impl Anime4KPlayerApp {
             screenshot_pending: None,
             media_info_cache: String::new(),
             media_info_sig: None,
+            time_pos_text: String::from("00:00"),
+            time_dur_text: String::from("00:00"),
+            time_pos_tick: i64::MIN,
+            time_dur_tick: i64::MIN,
+            volume_text: String::new(),
+            volume_text_vol: i32::MIN,
         };
         app.apply_style(&cc.egui_ctx);
         app.apply_theme(&cc.egui_ctx);

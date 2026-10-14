@@ -270,13 +270,13 @@ impl Anime4KPlayerApp {
     pub(crate) fn video_panel(&mut self, ui: &mut egui::Ui) {
         #[cfg(feature = "video")]
         if self.video.is_some() {
-            let status = self.status.clone();
-            // Render errors are invisible without a console, so they take
-            // over the status corner until rendering recovers.
-            let render_error = self
+            // Borrow, don't clone: the old code built 2 `String` per frame
+            // (`status.clone()` + `last_error().to_string()`) at 60fps.
+            let has_status = !self.status.is_empty();
+            let has_error = self
                 .video
                 .as_ref()
-                .and_then(|r| r.last_error().map(str::to_string));
+                .is_some_and(|r| r.last_error().is_some());
             let resp = Self::video_central_panel(self.player.fullscreen)
                 .show(ui, |ui| {
                     // A wide playlist can starve the center of space: clamp
@@ -292,7 +292,11 @@ impl Anime4KPlayerApp {
                     if let Some(renderer) = self.video.as_mut() {
                         renderer.show(ui, rect);
                     }
-                    if let Some(err) = render_error {
+                    // Zero-alloc overlay: `&str` straight into the painter,
+                    // no `status.clone()` / `to_string()` per frame. The
+                    // painter copies glyphs into its own tessellator anyway.
+                    let err_text: Option<&str> = self.video.as_ref().and_then(|r| r.last_error());
+                    if let Some(err) = err_text {
                         ui.painter().text(
                             rect.left_bottom() + egui::vec2(8.0, -8.0),
                             egui::Align2::LEFT_BOTTOM,
@@ -300,15 +304,17 @@ impl Anime4KPlayerApp {
                             egui::FontId::proportional(13.0),
                             egui::Color32::LIGHT_RED,
                         );
-                    } else if !status.is_empty() {
+                    } else if has_status {
                         ui.painter().text(
                             rect.left_bottom() + egui::vec2(8.0, -8.0),
                             egui::Align2::LEFT_BOTTOM,
-                            status,
+                            self.status.as_str(),
                             egui::FontId::proportional(13.0),
                             egui::Color32::LIGHT_GRAY,
                         );
                     }
+                    // Keep flags used (avoids unused warnings on some cfgs).
+                    let _ = has_error;
                     resp
                 })
                 .inner;
@@ -355,11 +361,10 @@ impl Anime4KPlayerApp {
                 );
             }
             if !self.status.is_empty() {
-                let status = self.status.clone();
                 ui.painter().text(
                     rect.left_bottom() + egui::vec2(8.0, -8.0),
                     egui::Align2::LEFT_BOTTOM,
-                    status,
+                    self.status.as_str(),
                     egui::FontId::proportional(13.0),
                     egui::Color32::LIGHT_GRAY,
                 );
@@ -395,22 +400,42 @@ impl Anime4KPlayerApp {
         let video_ms = self.video_ms_ema as i64;
         #[cfg(not(feature = "video"))]
         let video_ms = 0;
-        let sig = MediaInfoSig {
-            preset: self.player.preset_name.clone(),
-            video_format: self.snap.video_format.clone(),
-            audio_codec: self.snap.audio_codec.clone(),
-            width: self.snap.width,
-            height: self.snap.height,
-            fps_bits: self.snap.fps.map(f64::to_bits),
-            frame_drops: self.snap.frame_drops,
-            hwdec: self.snap.hwdec.clone(),
-            cache_pause: self.snap.cache_pause,
-            has_current: self.player.current.is_some(),
-            ui_ms: self.ui_ms_ema as i64,
-            video_ms,
-            lang: self.lang,
+        // Zero-alloc fast path: compare by reference, cloning only when the
+        // row actually needs a rebuild (was: 4 `String` clones per frame).
+        let matches = match self.media_info_sig.as_ref() {
+            Some(old) => {
+                old.preset.as_str() == self.player.preset_name.as_str()
+                    && old.video_format.as_deref() == self.snap.video_format.as_deref()
+                    && old.audio_codec.as_deref() == self.snap.audio_codec.as_deref()
+                    && old.width == self.snap.width
+                    && old.height == self.snap.height
+                    && old.fps_bits == self.snap.fps.map(f64::to_bits)
+                    && old.frame_drops == self.snap.frame_drops
+                    && old.hwdec.as_deref() == self.snap.hwdec.as_deref()
+                    && old.cache_pause == self.snap.cache_pause
+                    && old.has_current == self.player.current.is_some()
+                    && old.ui_ms == self.ui_ms_ema as i64
+                    && old.video_ms == video_ms
+                    && old.lang == self.lang
+            }
+            None => false,
         };
-        if self.media_info_sig.as_ref() != Some(&sig) {
+        if !matches {
+            let sig = MediaInfoSig {
+                preset: self.player.preset_name.clone(),
+                video_format: self.snap.video_format.clone(),
+                audio_codec: self.snap.audio_codec.clone(),
+                width: self.snap.width,
+                height: self.snap.height,
+                fps_bits: self.snap.fps.map(f64::to_bits),
+                frame_drops: self.snap.frame_drops,
+                hwdec: self.snap.hwdec.clone(),
+                cache_pause: self.snap.cache_pause,
+                has_current: self.player.current.is_some(),
+                ui_ms: self.ui_ms_ema as i64,
+                video_ms,
+                lang: self.lang,
+            };
             let codec = sig
                 .video_format
                 .clone()
@@ -488,12 +513,32 @@ impl Anime4KPlayerApp {
         let max = (duration * TIME_SCALE).max(1.0);
         let mut slider_val = pos * TIME_SCALE;
 
+        // Cached time labels: `fmt_time` allocates per call, and this runs
+        // at 24-60fps. Display granularity is 1s, so rebuild only when the
+        // whole second flips (~1 alloc/sec instead of ~120/sec).
+        let pos_tick = pos.max(0.0) as i64;
+        if self.time_pos_tick != pos_tick {
+            self.time_pos_tick = pos_tick;
+            self.time_pos_text = fmt_time(pos);
+        }
+        let dur_tick = duration.max(0.0) as i64;
+        if self.time_dur_tick != dur_tick {
+            self.time_dur_tick = dur_tick;
+            self.time_dur_text = fmt_time(duration);
+        }
+        // Cached volume label: was `format!("{}%")` every frame.
+        if self.volume_text_vol != self.player.volume {
+            self.volume_text_vol = self.player.volume;
+            self.volume_text = format!("{}%", self.player.volume);
+        }
+
         // Row 1: full-width seek bar, times pinned to the window edges.
         ui.horizontal(|ui| {
-            ui.monospace(fmt_time(pos));
+            ui.monospace(self.time_pos_text.as_str());
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                ui.monospace(fmt_time(duration));
+                ui.monospace(self.time_dur_text.as_str());
                 ui.spacing_mut().slider_width = ui.available_width();
+                let hover = format!("{} / {}", self.time_pos_text, self.time_dur_text);
                 let resp = ui
                     .add(
                         egui::Slider::new(&mut slider_val, 0.0..=max)
@@ -501,7 +546,7 @@ impl Anime4KPlayerApp {
                             .trailing_fill(true)
                             .step_by(0.5),
                     )
-                    .on_hover_text(format!("{} / {}", fmt_time(pos), fmt_time(duration)));
+                    .on_hover_text(hover);
                 // Seek on real gestures only — NEVER on bare `changed()`.
                 // With `step_by` the slider rounds the live `time-pos`
                 // back into `slider_val` every frame (`slider.rs`:
@@ -569,6 +614,8 @@ impl Anime4KPlayerApp {
 
             let mut vol = self.snap.volume;
             let vmax = self.player.max_volume_self();
+            // Hover still formats per frame (1 alloc), but the visible label
+            // below is cached; `vol` only changes at 0.7Hz + drags.
             let vol_resp = ui
                 .add(egui::Slider::new(&mut vol, 0..=vmax).show_value(false))
                 .on_hover_text(format!("{}: {}%", self.t("Volume level"), vol));
@@ -583,7 +630,7 @@ impl Anime4KPlayerApp {
             if vol_resp.drag_stopped() {
                 self.flush_config();
             }
-            ui.monospace(format!("{}%", self.player.volume))
+            ui.monospace(self.volume_text.as_str())
                 .on_hover_text(self.t("Volume level"));
         });
         ui.horizontal(|ui| {
@@ -744,19 +791,42 @@ impl Anime4KPlayerApp {
         // text width and anything dragged wider stays unpainted
         // (black strip). Forcing full width keeps the frame over
         // the whole allocation.
+        //
+        // Huge folders (10k files) would still create O(N) widgets per
+        // frame: `ScrollArea` culls *painting* but not widget creation.
+        // Window the list around the current file so per-frame cost stays
+        // bounded; the footer reports the hidden count.
+        const MAX_PLAYLIST_ROWS: usize = 2000;
+        const PLAYLIST_WINDOW: usize = 1000;
         {
             let names = self.player.cached_filenames();
+            let total = names.len();
+            let (start, end, truncated) = if total > MAX_PLAYLIST_ROWS {
+                let anchor = current.unwrap_or(0).min(total.saturating_sub(1));
+                let start = anchor
+                    .saturating_sub(PLAYLIST_WINDOW / 2)
+                    .min(total - MAX_PLAYLIST_ROWS);
+                (start, start + MAX_PLAYLIST_ROWS, true)
+            } else {
+                (0, total, false)
+            };
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
                     // Stretch rows across the full width so the highlight
                     // and the frame cover the whole panel, not just text.
                     ui.set_width(ui.available_width());
-                    for (i, name) in names.iter().enumerate() {
+                    if start > 0 {
+                        ui.weak(format!("… {} ↑", start));
+                    }
+                    for (i, name) in names.iter().enumerate().skip(start).take(end - start) {
                         let selected = current == Some(i);
                         if ui.selectable_label(selected, name).clicked() {
                             chosen = Some(i);
                         }
+                    }
+                    if truncated {
+                        ui.weak(format!("… {} ↓", total - end));
                     }
                 });
         }

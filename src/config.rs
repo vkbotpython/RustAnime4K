@@ -119,6 +119,29 @@ impl ConfigManager {
     pub fn delete(&mut self, key: &str) {
         self.values.remove(key);
     }
+
+    /// Prepends `value` to the string-array stored under `key` (MRU order),
+    /// dropping duplicates and truncating to `max_entries`. In-place, no
+    /// whole-table clone, so histories stay bounded (see `MAX_HISTORY_ENTRIES`).
+    pub fn push_history_capped(&mut self, key: &str, value: &str, max_entries: usize) {
+        let value = value.trim();
+        if value.is_empty() {
+            return;
+        }
+        let entry = self
+            .values
+            .entry(key.to_string())
+            .or_insert_with(|| Value::Array(Vec::new()));
+        let Value::Array(arr) = entry else {
+            *entry = Value::Array(vec![Value::String(value.to_string())]);
+            return;
+        };
+        arr.retain(|v| v.as_str() != Some(value));
+        arr.insert(0, Value::String(value.to_string()));
+        if arr.len() > max_entries {
+            arr.truncate(max_entries);
+        }
+    }
 }
 
 #[cfg(test)]

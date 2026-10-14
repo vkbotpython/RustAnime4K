@@ -8,6 +8,7 @@ mod app;
 mod config;
 mod formats;
 mod i18n;
+mod icon;
 mod mpv;
 mod player;
 mod playlist;
@@ -68,7 +69,7 @@ fn create_backend() -> Arc<dyn MpvBackend> {
 /// the `assets/` folder next to the exe. Falls back to the default icon
 /// if the PNG ever fails to decode.
 fn load_app_icon() -> Arc<egui::IconData> {
-    eframe::icon_data::from_png_bytes(include_bytes!("../assets/images/anime4k-player-icon.png"))
+    eframe::icon_data::from_png_bytes(crate::icon::ICON_PNG)
         .map(Arc::new)
         .unwrap_or_else(|err| {
             eprintln!("cannot decode app icon: {err:#}");
