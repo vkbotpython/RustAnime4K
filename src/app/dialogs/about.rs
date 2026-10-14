@@ -5,7 +5,12 @@ use crate::app::state::{APP_NAME, DONATE_CARD_PLAIN, DONATE_CARD_SPACED, VERSION
 use crate::i18n::Lang;
 use std::time::{Duration, Instant};
 
-use super::ui_kit::card;
+use super::ui_kit::{badge, card};
+
+/// Badge backgrounds for the engine/license values (same badge language as
+/// the tech stack above; engine reuses the libmpv purple).
+const ENGINE_BADGE: egui::Color32 = egui::Color32::from_rgb(123, 31, 162);
+const LICENSE_BADGE: egui::Color32 = egui::Color32::from_rgb(90, 90, 90);
 
 impl Anime4KPlayerApp {
     pub(crate) fn about_dialog(&mut self, ctx: &egui::Context) {
@@ -92,7 +97,7 @@ impl Anime4KPlayerApp {
                                 .strong()
                                 .size(12.5),
                         );
-                        ui.monospace(&mpv_version);
+                        ui.monospace(badge(&mpv_version, ENGINE_BADGE));
                         ui.end_row();
                         ui.label(
                             egui::RichText::new(if russian {
@@ -103,7 +108,7 @@ impl Anime4KPlayerApp {
                             .strong()
                             .size(12.5),
                         );
-                        ui.monospace("GPL-3.0-or-later");
+                        ui.monospace(badge("GPL-3.0-or-later", LICENSE_BADGE));
                         ui.end_row();
                     });
                 ui.add_space(6.0);
