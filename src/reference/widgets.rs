@@ -59,10 +59,7 @@ pub(crate) fn card(ui: &mut egui::Ui, fill: Color32, add: impl FnOnce(&mut egui:
 }
 
 pub(crate) fn card_fill(ui: &egui::Ui) -> Color32 {
-    // Лёгкая подложка поверх текущей темы (работает и в тёмной, и в светлой).
-    let base = ui.visuals().faint_bg_color;
-    // `faint_bg_color` уже полупрозрачный — делаем чуть плотнее для карточки.
-    Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 220)
+    crate::theme::card_fill_for(ui.visuals().window_fill)
 }
 
 pub(crate) fn note_fill(ui: &egui::Ui) -> Color32 {

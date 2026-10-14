@@ -39,10 +39,11 @@ impl Anime4KPlayerApp {
                     ui.monospace("volume=50");
                     hint(ui, "name=value");
                 });
-                // Buttons pinned to the bottom, editor fills the rest with
-                // an explicit size: a fixed-rows TextEdit lets the window
-                // snap back to content height, making vertical resize
-                // impossible. Filling the allocation keeps dragged height.
+                // Buttons pinned to the bottom, editor with a FIXED height.
+                // Sizing the editor from `available_size().y` feeds back
+                // into the auto-sized window (bigger editor -> bigger
+                // window -> bigger available -> ... until the screen edge).
+                const EDITOR_HEIGHT: f32 = 240.0;
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.horizontal(|ui| {
                         if ui.button(apply_label).clicked() {
@@ -71,9 +72,9 @@ impl Anime4KPlayerApp {
                             cancelled = true;
                         }
                     });
-                    let avail = ui.available_size();
+                    let width = ui.available_width();
                     ui.add_sized(
-                        egui::vec2(avail.x, avail.y.max(120.0)),
+                        egui::vec2(width, EDITOR_HEIGHT),
                         egui::TextEdit::multiline(&mut self.launch_params_text)
                             .font(egui::TextStyle::Monospace)
                             .hint_text("name=value"),

@@ -41,10 +41,10 @@ pub(crate) fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     ui.add_space(6.0);
 }
 
-/// Подложка карточки: чуть плотнее `faint_bg_color` текущей темы.
+/// Подложка карточки: сдвиг от `window_fill` текущей палитры (см.
+/// `crate::theme::card_fill_for`). Работает в обеих темах.
 pub(crate) fn card_fill(ui: &egui::Ui) -> Color32 {
-    let base = ui.visuals().faint_bg_color;
-    Color32::from_rgba_unmultiplied(base.r(), base.g(), base.b(), 220)
+    crate::theme::card_fill_for(ui.visuals().window_fill)
 }
 
 /// Однострочное поле ввода на всю ширину с подсказкой-плейсхолдером.

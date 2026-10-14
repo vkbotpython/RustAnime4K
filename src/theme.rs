@@ -118,6 +118,26 @@ pub mod style {
     }
 }
 
+/// Card surface fill derived from the palette's `window_fill`: shifted a
+/// step away from the window background so cards read as separate surfaces
+/// in both dark and light themes. (Do NOT build it from `faint_bg_color` —
+/// that is a near-black overlay in both themes, giving black cards on a
+/// white window.)
+pub fn card_fill_for(window: egui::Color32) -> egui::Color32 {
+    const DELTA: u8 = 18;
+    let luma = 0.299 * f32::from(window.r())
+        + 0.587 * f32::from(window.g())
+        + 0.114 * f32::from(window.b());
+    let shift = |c: u8| {
+        if luma < 128.0 {
+            c.saturating_add(DELTA)
+        } else {
+            c.saturating_sub(DELTA)
+        }
+    };
+    egui::Color32::from_rgb(shift(window.r()), shift(window.g()), shift(window.b()))
+}
+
 /// Applies the palette; `dark` selects the Light/Dark color-scheme branch.
 pub fn apply(ctx: &egui::Context, palette: Palette, dark: bool) {
     let mut visuals = if dark {
@@ -169,4 +189,23 @@ pub fn apply(ctx: &egui::Context, palette: Palette, dark: bool) {
         }
     }
     ctx.set_visuals(visuals);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn card_fill_offsets_away_from_window() {
+        // Dark window -> lighter card, light window -> darker card.
+        let dark = card_fill_for(egui::Color32::from_gray(27));
+        assert_eq!(dark, egui::Color32::from_gray(45));
+        let light = card_fill_for(egui::Color32::from_gray(248));
+        assert_eq!(light, egui::Color32::from_gray(230));
+        // Tinted palettes shift per channel without overflow.
+        let cream = card_fill_for(egui::Color32::from_rgb(245, 241, 235));
+        assert_eq!(cream, egui::Color32::from_rgb(227, 223, 217));
+        let near_black = card_fill_for(egui::Color32::from_rgb(0, 5, 250));
+        assert_eq!(near_black, egui::Color32::from_rgb(18, 23, 255));
+    }
 }
