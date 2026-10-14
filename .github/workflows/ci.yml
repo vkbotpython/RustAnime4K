@@ -205,9 +205,19 @@ jobs:
           tar -czf anime4k-player-linux-x86_64.tar.gz -C dist anime4k-player
 
       - uses: actions/upload-artifact@v7
+        if: runner.os == 'Windows'
         with:
-          name: anime4k-player-${{ runner.os }}
-          path: |
-            anime4k-player-windows-x86_64.zip
-            anime4k-player-windows-x86_64-setup.exe
-            anime4k-player-linux-x86_64.tar.gz
+          name: anime4k-player-Windows-portable
+          path: anime4k-player-windows-x86_64.zip
+
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'Windows'
+        with:
+          name: anime4k-player-Windows-setup
+          path: anime4k-player-windows-x86_64-setup.exe
+
+      - uses: actions/upload-artifact@v7
+        if: runner.os == 'Linux'
+        with:
+          name: anime4k-player-Linux
+          path: anime4k-player-linux-x86_64.tar.gz

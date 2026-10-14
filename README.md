@@ -241,10 +241,11 @@ audio-delay=0.15
   Windows + Linux; плюс `cargo check/test --features video` на Linux.
   Джоба `build-release` собирает `--features video` с бандлингом libmpv —
   её артефакты и есть рабочий плеер, качать из вкладки Actions:
-  Windows — портативный `anime4k-player-windows-x86_64.zip` **и**
-  установщик `anime4k-player-windows-x86_64-setup.exe` (визард: согласие
+  Windows — два отдельных артефакта: `anime4k-player-Windows-portable`
+  (`anime4k-player-windows-x86_64.zip`) и `anime4k-player-Windows-setup`
+  (`anime4k-player-windows-x86_64-setup.exe`, визард: согласие
   с лицензией, выбор каталога, ярлыки, ассоциации файлов);
-  Linux — `anime4k-player-linux-x86_64.tar.gz`.
+  Linux — `anime4k-player-Linux` (`anime4k-player-linux-x86_64.tar.gz`).
 - `release.yml`: dormant, срабатывает только по тегу `v*` (сборка релизных
   бинарников + Inno Setup + публикация GitHub Release).
 
