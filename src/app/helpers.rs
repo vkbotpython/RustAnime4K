@@ -5,6 +5,7 @@ use crate::formats::{AUDIO_FORMATS, SUBTITLES_FORMATS, VIDEO_FORMATS};
 use crate::mpv::TrackKind;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
+use std::sync::{LazyLock, Mutex, OnceLock};
 /// `MM:SS`, or `HH:MM:SS` for videos >= 1h.
 pub(crate) fn fmt_time(secs: f64) -> String {
     let total = secs.max(0.0) as u64;
@@ -18,7 +19,14 @@ pub(crate) fn fmt_time(secs: f64) -> String {
     }
 }
 
+/// Shader directory, resolved once: `current_exe` + up to 6 `stat` calls
+/// on every preset apply otherwise. The exe never moves at runtime.
 pub(crate) fn shaders_dir() -> PathBuf {
+    static DIR: OnceLock<PathBuf> = OnceLock::new();
+    DIR.get_or_init(find_shaders_dir).clone()
+}
+
+fn find_shaders_dir() -> PathBuf {
     // Install/dist layout: shaders next to the exe.
     let exe_dir = std::env::current_exe()
         .ok()
@@ -86,9 +94,19 @@ pub(crate) fn get_bool(cfg: &ConfigManager, key: &str, default: bool) -> bool {
 }
 
 /// Reads the system clipboard (for the `Paste` buttons). Returns empty string on failure.
+/// The OS clipboard handle is reused across calls instead of reconnecting
+/// (X11/Wayland handshake, COM init) on every Paste click.
 pub(crate) fn read_clipboard_text() -> String {
-    arboard::Clipboard::new()
-        .and_then(|mut cb| cb.get_text())
+    static CLIPBOARD: LazyLock<Mutex<Option<arboard::Clipboard>>> =
+        LazyLock::new(|| Mutex::new(arboard::Clipboard::new().ok()));
+
+    let mut guard = CLIPBOARD.lock().unwrap_or_else(|e| e.into_inner());
+    if guard.is_none() {
+        *guard = arboard::Clipboard::new().ok();
+    }
+    guard
+        .as_mut()
+        .and_then(|cb| cb.get_text().ok())
         .unwrap_or_default()
 }
 

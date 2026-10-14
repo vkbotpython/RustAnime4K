@@ -18,17 +18,39 @@ mod video;
 
 use std::sync::Arc;
 
-use clap::Parser;
-
 use app::{APP_NAME, Anime4KPlayerApp};
 use config::ConfigManager;
 use mpv::MpvBackend;
 
-#[derive(Parser, Debug)]
-#[command(name = "anime4k-player", about = "Video player with Anime4K upscaling")]
-struct Cli {
-    /// Media file, folder or URL to open (skips restoring the last session).
-    input: Option<String>,
+/// CLI input: optional media file, folder or URL (skips restoring the
+/// last session). Parsed by hand — a single positional is all this app
+/// needs, and it avoids pulling the whole `clap` tree (~14 crates).
+fn parse_cli_input() -> Option<String> {
+    let mut input: Option<String> = None;
+    for arg in std::env::args_os().skip(1) {
+        let s = arg.to_string_lossy().into_owned();
+        match s.as_str() {
+            "--" => continue,
+            "-h" | "--help" => {
+                println!(
+                    "{APP_NAME}\n\nUsage: anime4k-player [input]\n\nArguments:\n  [input]  Media file, folder or URL to open (skips restoring the last session)"
+                );
+                std::process::exit(0);
+            }
+            "-V" | "--version" => {
+                println!("anime4k-player {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
+            s if s.starts_with('-') => {
+                eprintln!("warning: unknown option '{s}' ignored");
+            }
+            _ if input.is_none() => {
+                input = Some(s);
+            }
+            _ => {}
+        }
+    }
+    input.filter(|s| !s.is_empty())
 }
 
 fn create_backend() -> Arc<dyn MpvBackend> {
@@ -55,7 +77,7 @@ fn load_app_icon() -> Arc<egui::IconData> {
 }
 
 fn main() -> eframe::Result<()> {
-    let cli = Cli::parse();
+    let cli_input = parse_cli_input();
     let backend = create_backend();
 
     // Last window geometry (see `track_window_geometry`): restore position,
@@ -107,7 +129,7 @@ fn main() -> eframe::Result<()> {
             Ok(Box::new(Anime4KPlayerApp::new(
                 cc,
                 backend.clone(),
-                cli.input,
+                cli_input,
             )))
         }),
     )

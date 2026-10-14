@@ -17,7 +17,7 @@ pub fn list_files(folder: &std::path::Path) -> Vec<std::path::PathBuf> {
                 .unwrap_or(false)
         })
         .collect();
-    files.sort();
+    files.sort_unstable();
     files
 }
 

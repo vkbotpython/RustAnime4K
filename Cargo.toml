@@ -29,7 +29,6 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 dirs = "6"
 anyhow = "1"
-clap = { version = "4", features = ["derive"] }
 rfd = "0.17"
 sys-locale = "0.3"
 arboard = "2"
@@ -45,3 +44,6 @@ winres = "0.1"
 [profile.release]
 opt-level = 3
 strip = true
+# Smaller + slightly faster binary at the cost of slower linking.
+lto = true
+codegen-units = 1

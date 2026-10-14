@@ -154,15 +154,25 @@ fn load_table(key: &str) -> HashMap<String, String> {
     serde_json::from_str(text).expect("i18n json must parse")
 }
 
-fn tables() -> &'static HashMap<&'static str, HashMap<String, String>> {
-    static TABLES: OnceLock<HashMap<&'static str, HashMap<String, String>>> = OnceLock::new();
-    TABLES.get_or_init(|| {
+fn tables_map() -> &'static HashMap<&'static str, OnceLock<HashMap<String, String>>> {
+    static MAP: OnceLock<HashMap<&'static str, OnceLock<HashMap<String, String>>>> =
+        OnceLock::new();
+    MAP.get_or_init(|| {
         let mut m = HashMap::new();
         for key in core::iter::once("en").chain(Lang::all().iter().map(|l| l.file_key())) {
-            m.entry(key).or_insert_with(|| load_table(key));
+            m.insert(key, OnceLock::new());
         }
         m
     })
+}
+
+/// Translation table for one language, loaded on first use. Only the
+/// active language (+ English fallback) is ever parsed — not all 25.
+fn table_for(lang_key: &'static str) -> &'static HashMap<String, String> {
+    tables_map()
+        .get(lang_key)
+        .expect("unknown i18n lang key")
+        .get_or_init(|| load_table(lang_key))
 }
 
 /// Detects the system language.
@@ -227,11 +237,10 @@ pub fn t(lang: Lang, key: &str) -> String {
     } else {
         lang
     };
-    let tables = tables();
-    if let Some(s) = tables.get(lang.file_key()).and_then(|table| table.get(key)) {
+    if let Some(s) = table_for(lang.file_key()).get(key) {
         return s.clone();
     }
-    if let Some(s) = tables.get("en").and_then(|table| table.get(key)) {
+    if let Some(s) = table_for("en").get(key) {
         return s.clone();
     }
     key.to_string()
@@ -246,11 +255,10 @@ pub fn t_static(lang: Lang, key: &'static str) -> &'static str {
     } else {
         lang
     };
-    let tables = tables();
-    if let Some(s) = tables.get(lang.file_key()).and_then(|table| table.get(key)) {
+    if let Some(s) = table_for(lang.file_key()).get(key) {
         return s.as_str();
     }
-    if let Some(s) = tables.get("en").and_then(|table| table.get(key)) {
+    if let Some(s) = table_for("en").get(key) {
         return s.as_str();
     }
     key
@@ -262,11 +270,10 @@ mod tests {
 
     #[test]
     fn all_langs_have_all_english_keys() {
-        let tables = tables();
-        let en = &tables["en"];
+        let en = table_for("en");
         assert!(!en.is_empty());
         for lang in Lang::all() {
-            let table = &tables[lang.file_key()];
+            let table = table_for(lang.file_key());
             for key in en.keys() {
                 assert!(
                     table.contains_key(key),
