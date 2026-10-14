@@ -22,6 +22,13 @@ pub struct PlayerState {
     pub preset_name: String,
     pub volume: i32,
     pub volume_plus: bool,
+    /// Cached `list_filenames()` output. Rebuilt lazily: `playlist_contents`
+    /// runs every frame, and `format!` per file per frame is O(N) allocs.
+    filenames_cache: Vec<String>,
+    filenames_dirty: bool,
+    /// Last `glsl-shaders` value sent to mpv. Resending the same kilometer
+    /// string recompiles shaders (UI stall), so repeats are skipped.
+    last_glsl_shaders: String,
 }
 
 impl PlayerState {
@@ -29,6 +36,7 @@ impl PlayerState {
         Self {
             volume: volume.clamp(0, Self::max_volume(volume_plus)),
             volume_plus,
+            filenames_dirty: true,
             ..Default::default()
         }
     }
@@ -45,8 +53,18 @@ impl PlayerState {
         Self::max_volume(self.volume_plus)
     }
 
-    pub fn filenames_only(&self) -> Vec<String> {
-        list_filenames(&self.files)
+    /// Cached display names (`"1) name.mkv"`). Rebuilds only when the file
+    /// list changed; `playlist_contents` calls this every frame.
+    pub fn cached_filenames(&mut self) -> &[String] {
+        if self.filenames_dirty {
+            self.filenames_cache = list_filenames(&self.files);
+            self.filenames_dirty = false;
+        }
+        &self.filenames_cache
+    }
+
+    fn mark_files_changed(&mut self) {
+        self.filenames_dirty = true;
     }
 
     pub fn current_file(&self) -> Option<&PathBuf> {
@@ -56,6 +74,7 @@ impl PlayerState {
     fn set_single(&mut self, file: PathBuf) {
         self.files = vec![file];
         self.current = Some(0);
+        self.mark_files_changed();
     }
 
     /// Opens a single file for playback.
@@ -71,6 +90,7 @@ impl PlayerState {
         mpv.stop();
         self.files = vec![PathBuf::from(&url)];
         self.current = Some(0);
+        self.mark_files_changed();
         mpv.play(&url);
     }
 
@@ -78,6 +98,7 @@ impl PlayerState {
     pub fn open_folder(&mut self, mpv: &dyn MpvBackend, folder: &Path, file: Option<&Path>) {
         mpv.stop();
         self.files = list_files(folder);
+        self.mark_files_changed();
         let index = file
             .and_then(|f| self.files.iter().position(|p| p == f))
             .unwrap_or(0);
@@ -92,6 +113,7 @@ impl PlayerState {
     /// Adds a file to the playlist (drag&drop of extra files).
     pub fn add_file(&mut self, file: PathBuf) {
         self.files.push(file);
+        self.mark_files_changed();
         if self.current.is_none() {
             self.current = Some(0);
         }
@@ -139,6 +161,7 @@ impl PlayerState {
         self.files.clear();
         self.current = None;
         self.preset_name.clear();
+        self.mark_files_changed();
     }
 
     pub fn set_volume(&mut self, mpv: &dyn MpvBackend, volume: i32) {
@@ -165,13 +188,25 @@ impl PlayerState {
 
     /// Disables Anime4K upscaling.
     pub fn disable_anime4k(&mut self, mpv: &dyn MpvBackend) {
+        // Skip resend: same empty value already active, and re-sending
+        // `glsl-shaders` forces a shader recompile stall.
+        if self.preset_name.is_empty() && self.last_glsl_shaders.is_empty() {
+            return;
+        }
         self.preset_name.clear();
+        self.last_glsl_shaders.clear();
         mpv.set_glsl_shaders("");
     }
 
     /// Applies an Anime4K preset.
     pub fn apply_preset(&mut self, mpv: &dyn MpvBackend, name: &str, glsl_shaders: &str) {
+        // Skip resend of the identical value (preset re-select, pending
+        // flush after restart): avoids the shader-recompile freeze.
+        if self.preset_name == name && self.last_glsl_shaders == glsl_shaders {
+            return;
+        }
         self.preset_name = name.to_string();
+        self.last_glsl_shaders = glsl_shaders.to_string();
         mpv.set_glsl_shaders(glsl_shaders);
     }
 }
@@ -260,5 +295,44 @@ mod tests {
             mpv.last_played().as_deref(),
             Some("https://example.com/v.mp4")
         );
+    }
+
+    #[test]
+    fn cached_filenames_refresh_on_change() {
+        let mpv = MockMpv::new();
+        let mut p = PlayerState::new(80, false);
+        assert!(p.cached_filenames().is_empty());
+        p.open_file(&mpv, &file("a.mkv"));
+        assert_eq!(p.cached_filenames(), &["1) a.mkv".to_string()]);
+        p.add_file(file("b.mkv"));
+        assert_eq!(
+            p.cached_filenames(),
+            &["1) a.mkv".to_string(), "2) b.mkv".to_string()]
+        );
+        // No change: same contents.
+        assert_eq!(p.cached_filenames().len(), 2);
+        p.close(&mpv);
+        assert!(p.cached_filenames().is_empty());
+    }
+
+    #[test]
+    fn glsl_resend_is_skipped() {
+        let mpv = MockMpv::new();
+        let mut p = PlayerState::new(80, false);
+        // Fresh player is already "disabled": no backend write.
+        mpv.set_glsl_shaders("sentinel");
+        p.disable_anime4k(&mpv);
+        assert_eq!(mpv.glsl_shaders(), "sentinel");
+
+        // First apply writes through.
+        p.apply_preset(&mpv, "M (A)", "a.glsl;b.glsl");
+        assert_eq!(mpv.glsl_shaders(), "a.glsl;b.glsl");
+        // Identical re-apply is skipped (tamper survives).
+        mpv.set_glsl_shaders("tampered");
+        p.apply_preset(&mpv, "M (A)", "a.glsl;b.glsl");
+        assert_eq!(mpv.glsl_shaders(), "tampered");
+        // Different value goes through.
+        p.apply_preset(&mpv, "M (A)", "c.glsl");
+        assert_eq!(mpv.glsl_shaders(), "c.glsl");
     }
 }

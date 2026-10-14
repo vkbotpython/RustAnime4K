@@ -1,7 +1,7 @@
 //! Панели: меню, видео, транспорт, треки, плейлист.
 
 use super::helpers::{fmt_time, is_url_like, pick_sidecar_file, read_clipboard_text};
-use super::state::Anime4KPlayerApp;
+use super::state::{Anime4KPlayerApp, MediaInfoSig};
 use super::state::{SPEEDS, TIME_SCALE};
 use crate::anime4k;
 use crate::mpv::TrackKind;
@@ -125,14 +125,9 @@ impl Anime4KPlayerApp {
                     });
                 }
                 ui.menu_button(format!("{} HQ", self.t("Quality")), |ui| {
-                    let mut names: Vec<String> = anime4k::ultra_hq_presets()
-                        .keys()
-                        .map(|s| s.to_string())
-                        .collect();
-                    names.sort();
-                    for name in names {
+                    for name in anime4k::ultra_hq_sorted_names() {
                         if ui.button(format!("{} {name}", self.t("Mode"))).clicked() {
-                            self.apply_anime4k_hq(&name);
+                            self.apply_anime4k_hq(name);
                         }
                     }
                 });
@@ -202,14 +197,9 @@ impl Anime4KPlayerApp {
                 });
             }
             ui.menu_button(format!("{} HQ", self.t("Quality")), |ui| {
-                let mut names: Vec<String> = anime4k::ultra_hq_presets()
-                    .keys()
-                    .map(|s| s.to_string())
-                    .collect();
-                names.sort();
-                for name in names {
+                for name in anime4k::ultra_hq_sorted_names() {
                     if ui.button(format!("{} {name}", self.t("Mode"))).clicked() {
-                        self.apply_anime4k_hq(&name);
+                        self.apply_anime4k_hq(name);
                         ui.close();
                     }
                 }
@@ -398,49 +388,67 @@ impl Anime4KPlayerApp {
         }
     }
 
-    pub(crate) fn media_info(&self) -> String {
-        let codec = self
-            .snap
-            .video_format
-            .clone()
-            .or_else(|| self.snap.audio_codec.clone())
-            .unwrap_or_default()
-            .to_uppercase();
-        let resolution = match (self.snap.width, self.snap.height) {
-            (Some(w), Some(h)) => format!("{w}x{h}"),
-            _ => String::new(),
+    /// Cached media-info row. Rebuilds only when snapshot inputs change;
+    /// per-frame callers get the stored string instead of ~8 fresh `String`.
+    pub(crate) fn cached_media_info(&mut self) -> &str {
+        #[cfg(feature = "video")]
+        let video_ms = self.video_ms_ema as i64;
+        #[cfg(not(feature = "video"))]
+        let video_ms = 0;
+        let sig = MediaInfoSig {
+            preset: self.player.preset_name.clone(),
+            video_format: self.snap.video_format.clone(),
+            audio_codec: self.snap.audio_codec.clone(),
+            width: self.snap.width,
+            height: self.snap.height,
+            fps_bits: self.snap.fps.map(f64::to_bits),
+            frame_drops: self.snap.frame_drops,
+            hwdec: self.snap.hwdec.clone(),
+            cache_pause: self.snap.cache_pause,
+            has_current: self.player.current.is_some(),
+            ui_ms: self.ui_ms_ema as i64,
+            video_ms,
+            lang: self.lang,
         };
-        let fps = match self.snap.fps {
-            Some(f) if !resolution.is_empty() => format!("{f:.1} FPS"),
-            _ => String::new(),
-        };
-        let drops = match self.snap.frame_drops {
-            Some(n) => format!("{}: {n}", self.t("Frames lost")),
-            None => String::new(),
-        };
-        let mut parts = [
-            self.player.preset_name.clone(),
-            codec,
-            resolution,
-            fps,
-            drops,
-        ]
-        .into_iter()
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>();
-        // Live perf readout while playing (see ui_ms_ema/video_ms_ema).
-        if self.player.current.is_some() {
-            parts.push(format!("UI {:.0}ms", self.ui_ms_ema));
-            #[cfg(feature = "video")]
-            parts.push(format!("V {:.0}ms", self.video_ms_ema));
-            if self.snap.cache_pause {
-                parts.push("CACHE-WAIT".to_string());
+        if self.media_info_sig.as_ref() != Some(&sig) {
+            let codec = sig
+                .video_format
+                .clone()
+                .or_else(|| sig.audio_codec.clone())
+                .unwrap_or_default()
+                .to_uppercase();
+            let resolution = match (sig.width, sig.height) {
+                (Some(w), Some(h)) => format!("{w}x{h}"),
+                _ => String::new(),
+            };
+            let fps = match sig.fps_bits.map(f64::from_bits) {
+                Some(f) if !resolution.is_empty() => format!("{f:.1} FPS"),
+                _ => String::new(),
+            };
+            let drops = match sig.frame_drops {
+                Some(n) => format!("{}: {n}", self.t("Frames lost")),
+                None => String::new(),
+            };
+            let mut parts = [sig.preset.clone(), codec, resolution, fps, drops]
+                .into_iter()
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>();
+            // Live perf readout while playing (see ui_ms_ema/video_ms_ema).
+            if sig.has_current {
+                parts.push(format!("UI {:.0}ms", self.ui_ms_ema));
+                #[cfg(feature = "video")]
+                parts.push(format!("V {:.0}ms", self.video_ms_ema));
+                if sig.cache_pause {
+                    parts.push("CACHE-WAIT".to_string());
+                }
+                if let Some(hw) = &sig.hwdec {
+                    parts.push(format!("HW {hw}"));
+                }
             }
-            if let Some(hw) = &self.snap.hwdec {
-                parts.push(format!("HW {hw}"));
-            }
+            self.media_info_cache = parts.join(" | ");
+            self.media_info_sig = Some(sig);
         }
-        parts.join(" | ")
+        &self.media_info_cache
     }
 
     pub(crate) fn controls_panel(&mut self, ui: &mut egui::Ui) {
@@ -579,7 +587,7 @@ impl Anime4KPlayerApp {
                 .on_hover_text(self.t("Volume level"));
         });
         ui.horizontal(|ui| {
-            ui.monospace(self.media_info());
+            ui.monospace(self.cached_media_info());
         });
         if self.show_audio_menu {
             self.track_menu(ui, TrackKind::Audio);
@@ -716,34 +724,38 @@ impl Anime4KPlayerApp {
     /// Содержимое плейлиста (общее для `playlist_panel` и оверлея).
     pub(crate) fn playlist_contents(&mut self, ui: &mut egui::Ui) {
         ui.heading(self.t("Playlist"));
-        let names = self.player.filenames_only();
         let current = self.player.current;
         let mut chosen: Option<usize> = None;
+        // Single list: cached names (rebuilt only when files change),
+        // so per-frame cost is O(visible) instead of O(N) allocs.
         // NB: a vertical ScrollArea shrinks horizontally to fit its
         // content by default. The panel frame then covers only the
         // text width and anything dragged wider stays unpainted
         // (black strip). Forcing full width keeps the frame over
         // the whole allocation.
-        egui::ScrollArea::vertical()
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                // Stretch rows across the full width so the highlight
-                // and the frame cover the whole panel, not just text.
-                ui.set_width(ui.available_width());
-                for (i, name) in names.iter().enumerate() {
-                    let selected = current == Some(i);
-                    if ui.selectable_label(selected, name).clicked() {
-                        chosen = Some(i);
+        {
+            let names = self.player.cached_filenames();
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    // Stretch rows across the full width so the highlight
+                    // and the frame cover the whole panel, not just text.
+                    ui.set_width(ui.available_width());
+                    for (i, name) in names.iter().enumerate() {
+                        let selected = current == Some(i);
+                        if ui.selectable_label(selected, name).clicked() {
+                            chosen = Some(i);
+                        }
                     }
-                }
-            });
+                });
+        }
         if let Some(i) = chosen {
             let ctx = ui.ctx().clone();
             self.do_play_index(&ctx, i);
         }
-        // List above, source info pinned to the bottom: the scroll
-        // area fills only the *remaining* height, so the footer can
-        // never overflow the panel into the controls bar.
+        // Source info pinned to the bottom: footer only, no second list
+        // (the old duplicate ScrollArea doubled widget cost per frame and
+        // its clicks were dropped — `chosen` was never consumed there).
         ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
             // Source info: folder path, or "URL" for links.
             // Truncated: with the width capped, a long path must not
@@ -759,25 +771,6 @@ impl Anime4KPlayerApp {
                     );
                 }
             }
-            // NB: a vertical ScrollArea shrinks horizontally to fit
-            // its content by default. The panel frame then covers
-            // only the text width and anything dragged wider stays
-            // unpainted (black strip). Forcing full width keeps the
-            // frame over the whole allocation.
-            egui::ScrollArea::vertical()
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    // Stretch rows across the full width so the
-                    // highlight and the frame cover the whole panel,
-                    // not just text.
-                    ui.set_width(ui.available_width());
-                    for (i, name) in names.iter().enumerate() {
-                        let selected = current == Some(i);
-                        if ui.selectable_label(selected, name).clicked() {
-                            chosen = Some(i);
-                        }
-                    }
-                });
         });
     }
 }

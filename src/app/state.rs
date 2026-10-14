@@ -8,6 +8,7 @@ use crate::theme::{self, ColorScheme, Palette};
 #[cfg(feature = "video")]
 use crate::video::VideoRenderer;
 use serde_json::{Value, json};
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -143,16 +144,47 @@ pub struct Anime4KPlayerApp {
     /// so completion is detected by a new file appearing in the folder
     /// (see `poll_screenshot`) instead of trusting silent dispatch.
     pub(crate) screenshot_pending: Option<ScreenshotWatch>,
+
+    /// Cached media-info row. `media_info()` allocated ~8 `String` every
+    /// frame; the cache rebuilds only when snapshot inputs change.
+    pub(crate) media_info_cache: String,
+    pub(crate) media_info_sig: Option<MediaInfoSig>,
+}
+
+/// Fingerprint of `media_info()` inputs. Any change means the row must be
+/// rebuilt; equality means the cached string can be reused as-is.
+#[derive(Clone, PartialEq, Debug)]
+pub(crate) struct MediaInfoSig {
+    pub(crate) preset: String,
+    pub(crate) video_format: Option<String>,
+    pub(crate) audio_codec: Option<String>,
+    pub(crate) width: Option<i64>,
+    pub(crate) height: Option<i64>,
+    pub(crate) fps_bits: Option<u64>,
+    pub(crate) frame_drops: Option<i64>,
+    pub(crate) hwdec: Option<String>,
+    pub(crate) cache_pause: bool,
+    pub(crate) has_current: bool,
+    pub(crate) ui_ms: i64,
+    pub(crate) video_ms: i64,
+    pub(crate) lang: Lang,
 }
 
 /// A screenshot request waiting for its file to land on disk.
 pub(crate) struct ScreenshotWatch {
     pub(crate) dir: PathBuf,
     /// File names present at dispatch; the screenshot is the newcomer.
-    pub(crate) before: Vec<String>,
+    /// `HashSet` for O(1) lookup instead of O(n*m) scans.
+    pub(crate) before: HashSet<String>,
     /// Give up (and report where to look) after this instant.
     pub(crate) deadline: Instant,
+    /// Last filesystem poll. `poll_screenshot` runs every frame; without
+    /// throttling it issues `read_dir` 60x/sec.
+    pub(crate) last_check: Option<Instant>,
 }
+
+/// Minimum interval between screenshot-folder polls.
+pub(crate) const SCREENSHOT_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Cached mpv state. During playback egui repaints on every video frame
 /// (24-60/s via the render-context update callback); doing a dozen blocking
@@ -317,6 +349,8 @@ impl Anime4KPlayerApp {
             video_ms_ema: 0.0,
             about_copied_at: None,
             screenshot_pending: None,
+            media_info_cache: String::new(),
+            media_info_sig: None,
         };
         app.apply_style(&cc.egui_ctx);
         app.apply_theme(&cc.egui_ctx);

@@ -227,7 +227,7 @@ fn mock_bmp_bytes() -> Vec<u8> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::mpv::{TrackKind, dir_file_names, find_new_file};
+    use crate::mpv::{TrackKind, dir_file_names, find_new_file, find_new_file_set};
 
     #[test]
     fn sub_display_variants() {
@@ -326,5 +326,21 @@ mod tests {
         mpv.screenshot().unwrap();
         assert!(nested.is_dir());
         assert_eq!(dir_file_names(&nested).len(), 1);
+    }
+
+    #[test]
+    fn find_new_file_set_matches_slice_version() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.bmp"), b"x").unwrap();
+        let before: Vec<String> = dir_file_names(dir.path());
+        let before_set: std::collections::HashSet<String> = before.iter().cloned().collect();
+        assert!(find_new_file(&before, dir.path()).is_none());
+        assert!(find_new_file_set(&before_set, dir.path()).is_none());
+        std::fs::write(dir.path().join("b.bmp"), b"y").unwrap();
+        assert_eq!(find_new_file(&before, dir.path()).as_deref(), Some("b.bmp"));
+        assert_eq!(
+            find_new_file_set(&before_set, dir.path()).as_deref(),
+            Some("b.bmp")
+        );
     }
 }

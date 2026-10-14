@@ -32,12 +32,8 @@ impl Anime4KPlayerApp {
         let name = display_name_of(&current.to_string_lossy());
 
         // Modes depend on the selected quality (standard 6 vs HQ list).
-        let hq_names: Vec<String> = anime4k::ultra_hq_presets()
-            .keys()
-            .map(|s| s.to_string())
-            .collect();
-        let mut hq_names = hq_names;
-        hq_names.sort();
+        // Cached sorted names: no per-frame HashMap build.
+        let hq_names = anime4k::ultra_hq_sorted_names();
         let is_hq = self.preset_offer_quality == "HQ";
         if is_hq {
             if !hq_names.contains(&self.preset_offer_mode) {
@@ -102,7 +98,7 @@ impl Anime4KPlayerApp {
                                 .selected_text(self.preset_offer_mode.clone())
                                 .show_ui(ui, |ui| {
                                     if is_hq {
-                                        for mode in &hq_names {
+                                        for mode in hq_names {
                                             ui.selectable_value(
                                                 &mut self.preset_offer_mode,
                                                 mode.clone(),

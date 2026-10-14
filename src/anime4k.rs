@@ -6,6 +6,7 @@
 
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::OnceLock;
 
 pub const QUALITIES: &[&str] = &["S", "M", "L", "VL", "UL"];
 pub const MODES: &[&str] = &["A", "B", "C", "A+A", "B+B", "C+A"];
@@ -134,7 +135,36 @@ pub fn standard_presets() -> HashMap<&'static str, Vec<String>> {
 }
 
 /// The 8 ultra-HQ presets.
+///
+/// Hot paths (open menus, preset offer) must use [`ultra_hq_presets_cached`]
+/// / [`ultra_hq_sorted_names`] instead: this builder allocates ~50 `String`
+/// on every call.
+#[allow(dead_code)]
 pub fn ultra_hq_presets() -> HashMap<&'static str, Vec<String>> {
+    build_ultra_hq_presets()
+}
+
+/// Cached ultra-HQ table: built once, shared by all callers.
+/// Replaces per-frame `ultra_hq_presets()` construction in menus/dialogs.
+pub fn ultra_hq_presets_cached() -> &'static HashMap<&'static str, Vec<String>> {
+    static CACHE: OnceLock<HashMap<&'static str, Vec<String>>> = OnceLock::new();
+    CACHE.get_or_init(build_ultra_hq_presets)
+}
+
+/// Sorted ultra-HQ preset names for menus/combos: built once.
+pub fn ultra_hq_sorted_names() -> &'static [String] {
+    static NAMES: OnceLock<Vec<String>> = OnceLock::new();
+    NAMES.get_or_init(|| {
+        let mut names: Vec<String> = ultra_hq_presets_cached()
+            .keys()
+            .map(|s| s.to_string())
+            .collect();
+        names.sort();
+        names
+    })
+}
+
+fn build_ultra_hq_presets() -> HashMap<&'static str, Vec<String>> {
     HashMap::from([
         (
             "A",
@@ -362,5 +392,29 @@ mod tests {
     fn standard_and_ultra_counts() {
         assert_eq!(standard_presets().len(), 9);
         assert_eq!(ultra_hq_presets().len(), 8);
+    }
+
+    #[test]
+    fn cached_ultra_matches_fresh_and_sorted() {
+        let cached = ultra_hq_presets_cached();
+        assert_eq!(cached.len(), 8);
+        let names = ultra_hq_sorted_names();
+        assert_eq!(names.len(), 8);
+        let mut sorted = names.to_vec();
+        sorted.sort();
+        assert_eq!(names, sorted.as_slice());
+        // Same set as the fresh builder.
+        let mut fresh: Vec<String> = ultra_hq_presets().keys().map(|s| s.to_string()).collect();
+        fresh.sort();
+        assert_eq!(names, fresh.as_slice());
+        // Stable address across calls (built once).
+        assert!(std::ptr::eq(
+            ultra_hq_presets_cached(),
+            ultra_hq_presets_cached()
+        ));
+        assert!(std::ptr::eq(
+            ultra_hq_sorted_names(),
+            ultra_hq_sorted_names()
+        ));
     }
 }

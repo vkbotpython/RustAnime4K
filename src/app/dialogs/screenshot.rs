@@ -13,16 +13,31 @@ use super::ui_kit::{card, field_title, hint, text_field};
 
 impl Anime4KPlayerApp {
     /// Non-blocking completion check for an armed screenshot watch.
-    /// Called every frame: reports the landed file by name, or — past the
-    /// deadline — points at `mpv.log` instead of pretending it worked.
+    /// Throttled to `SCREENSHOT_POLL_INTERVAL`: called every frame, but
+    /// `read_dir` runs at most 4x/sec instead of 60x/sec.
     pub(crate) fn poll_screenshot(&mut self) {
-        let Some(watch) = self.screenshot_pending.take() else {
+        use super::super::state::SCREENSHOT_POLL_INTERVAL;
+
+        let Some(mut watch) = self.screenshot_pending.take() else {
             return;
         };
-        if let Some(name) = crate::mpv::find_new_file(&watch.before, &watch.dir) {
-            self.set_status(format!("{}: {name}", self.t("Screenshot")));
-        } else if Instant::now() >= watch.deadline {
+        let now = Instant::now();
+        // Deadline first: no more polling past it.
+        if now >= watch.deadline {
             self.set_status(format!("{} (mpv.log)", self.t("Error")));
+            return;
+        }
+        // Throttle filesystem polls; first check runs immediately.
+        if watch
+            .last_check
+            .is_some_and(|last| now.duration_since(last) < SCREENSHOT_POLL_INTERVAL)
+        {
+            self.screenshot_pending = Some(watch);
+            return;
+        }
+        watch.last_check = Some(now);
+        if let Some(name) = crate::mpv::find_new_file_set(&watch.before, &watch.dir) {
+            self.set_status(format!("{}: {name}", self.t("Screenshot")));
         } else {
             self.screenshot_pending = Some(watch);
         }
@@ -125,7 +140,8 @@ impl Anime4KPlayerApp {
                             failed = true;
                         } else {
                             let dir_path = PathBuf::from(&dir);
-                            let before = crate::mpv::dir_file_names(&dir_path);
+                            let before =
+                                crate::mpv::dir_file_names(&dir_path).into_iter().collect();
                             let dispatched = self
                                 .mpv
                                 .set_screenshot_directory(&dir)
@@ -138,6 +154,7 @@ impl Anime4KPlayerApp {
                                         dir: dir_path,
                                         before,
                                         deadline: Instant::now() + Duration::from_secs(5),
+                                        last_check: None,
                                     });
                                 }
                                 Err(e) => {

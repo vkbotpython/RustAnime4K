@@ -136,17 +136,19 @@ impl Anime4KPlayerApp {
                     Err(_) => false,
                 }
             }
-            PresetChoice::Hq { name } => match anime4k::ultra_hq_presets().get(name.as_str()) {
-                Some(preset) => match self.glsl_value(preset) {
-                    Some(value) => {
-                        self.player
-                            .apply_preset(&*self.mpv, &format!("{name} (HQ)"), &value);
-                        true
-                    }
+            PresetChoice::Hq { name } => {
+                match anime4k::ultra_hq_presets_cached().get(name.as_str()) {
+                    Some(preset) => match self.glsl_value(preset) {
+                        Some(value) => {
+                            self.player
+                                .apply_preset(&*self.mpv, &format!("{name} (HQ)"), &value);
+                            true
+                        }
+                        None => false,
+                    },
                     None => false,
-                },
-                None => false,
-            },
+                }
+            }
         }
     }
 
@@ -322,7 +324,7 @@ impl Anime4KPlayerApp {
     /// Explicit user choice: remember an HQ preset for the current file;
     /// applied once playback is stable (see `flush_pending_preset`).
     pub(crate) fn apply_anime4k_hq(&mut self, name: &str) {
-        if anime4k::ultra_hq_presets().contains_key(name) {
+        if anime4k::ultra_hq_presets_cached().contains_key(name) {
             let choice = PresetChoice::Hq {
                 name: name.to_string(),
             };

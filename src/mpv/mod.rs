@@ -11,7 +11,9 @@ mod files;
 mod libmpv;
 mod mock;
 
-pub(crate) use self::files::{dir_file_names, find_new_file};
+#[cfg(test)]
+pub(crate) use self::files::find_new_file;
+pub(crate) use self::files::{dir_file_names, find_new_file_set};
 #[cfg(feature = "video")]
 pub use self::libmpv::{LibMpv, cap_mpv_log};
 pub use self::mock::MockMpv;
