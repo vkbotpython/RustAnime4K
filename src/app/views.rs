@@ -8,114 +8,157 @@ use crate::mpv::TrackKind;
 use serde_json::json;
 use std::time::Instant;
 
+/// Альфа подложки фулскрин-оверлеев (0-255): слегка прозрачная, видео под
+/// панелью едва просвечивает, а текст и кнопки остаются родными.
+const OVERLAY_ALPHA: u8 = 225;
+/// Ширина выезжающего плейлиста в фулскрине (фиксированная: таскать край
+/// панели поверх видео неудобно, да и не нужно).
+const OVERLAY_PLAYLIST_WIDTH: f32 = 320.0;
+
 impl Anime4KPlayerApp {
+    /// Подложка фулскрин-оверлеев: цвет окна текущей темы, но слегка
+    /// прозрачный. Прозрачным делается только фон — кнопки и текст поверх
+    /// остаются непрозрачными и читаемыми в любой теме.
+    fn overlay_fill(ui: &egui::Ui) -> egui::Color32 {
+        let c = ui.visuals().window_fill;
+        egui::Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), OVERLAY_ALPHA)
+    }
+
     pub(crate) fn menu_bar(&mut self, ui: &mut egui::Ui) {
         egui::Panel::top("menu_bar").show(ui, |ui| {
-            egui::MenuBar::new().ui(ui, |ui| {
-                ui.menu_button(self.t("File"), |ui| {
-                    if ui.button(self.t("Open file")).clicked() {
-                        let ctx = ui.ctx().clone();
-                        self.do_open_file(&ctx);
-                    }
-                    if ui.button(self.t("Open URL")).clicked() {
-                        self.url_text.clear();
-                        self.show_open_url = true;
-                    }
-                    if ui.button(self.t("Open folder")).clicked() {
-                        self.folder_text.clear();
-                        self.show_open_folder = true;
-                    }
-                    if ui.button(self.t("Close")).clicked() {
-                        let ctx = ui.ctx().clone();
-                        self.do_close(&ctx);
-                    }
-                    if ui.button(self.t("Exit")).clicked() {
-                        ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            self.menu_contents(ui);
+        });
+    }
+
+    /// Верхнее меню поверх видео для фулскрина: висит на полупрозрачной
+    /// подложке и не отнимает у картинки место (см. `controls_overlay`).
+    pub(crate) fn menu_overlay(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let width = ctx.viewport_rect().width().max(0.0);
+        egui::Area::new(egui::Id::new("menu_overlay"))
+            .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 0.0))
+            .order(egui::Order::Foreground)
+            .movable(false)
+            .show(&ctx, |ui| {
+                let fill = Self::overlay_fill(ui);
+                egui::Frame::NONE
+                    .fill(fill)
+                    .inner_margin(egui::Margin::symmetric(8, 4))
+                    .show(ui, |ui| {
+                        let w = (width - 16.0).max(0.0);
+                        ui.set_min_width(w);
+                        ui.set_max_width(w);
+                        self.menu_contents(ui);
+                    });
+            });
+    }
+
+    /// Кнопки верхнего меню (общие для `menu_bar` и `menu_overlay`).
+    pub(crate) fn menu_contents(&mut self, ui: &mut egui::Ui) {
+        egui::MenuBar::new().ui(ui, |ui| {
+            ui.menu_button(self.t("File"), |ui| {
+                if ui.button(self.t("Open file")).clicked() {
+                    let ctx = ui.ctx().clone();
+                    self.do_open_file(&ctx);
+                }
+                if ui.button(self.t("Open URL")).clicked() {
+                    self.url_text.clear();
+                    self.show_open_url = true;
+                }
+                if ui.button(self.t("Open folder")).clicked() {
+                    self.folder_text.clear();
+                    self.show_open_folder = true;
+                }
+                if ui.button(self.t("Close")).clicked() {
+                    let ctx = ui.ctx().clone();
+                    self.do_close(&ctx);
+                }
+                if ui.button(self.t("Exit")).clicked() {
+                    ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+                }
+            });
+            ui.menu_button(self.t("Playback"), |ui| {
+                if ui.button(self.t("Play | Pause")).clicked() {
+                    self.toggle_play();
+                }
+                if ui.button(self.t("Fullscreen")).clicked() {
+                    let ctx = ui.ctx().clone();
+                    self.toggle_fullscreen(&ctx);
+                }
+                ui.menu_button(self.t("Playback speed"), |ui| {
+                    for speed in SPEEDS {
+                        if ui.button(format!("x{speed:.2}")).clicked() {
+                            self.mpv.set_speed(*speed);
+                        }
                     }
                 });
-                ui.menu_button(self.t("Playback"), |ui| {
-                    if ui.button(self.t("Play | Pause")).clicked() {
-                        self.toggle_play();
-                    }
-                    if ui.button(self.t("Fullscreen")).clicked() {
-                        let ctx = ui.ctx().clone();
-                        self.toggle_fullscreen(&ctx);
-                    }
-                    ui.menu_button(self.t("Playback speed"), |ui| {
-                        for speed in SPEEDS {
-                            if ui.button(format!("x{speed:.2}")).clicked() {
-                                self.mpv.set_speed(*speed);
+                if ui.button(self.t("Volume +10")).clicked() {
+                    self.player.volume_up(&*self.mpv);
+                }
+                if ui.button(self.t("Volume -10")).clicked() {
+                    self.player.volume_down(&*self.mpv);
+                }
+                if ui.button(self.t("Rewind +5 sec")).clicked() {
+                    self.mpv.seek(5.0);
+                }
+                if ui.button(self.t("Rewind -5 sec")).clicked() {
+                    self.mpv.seek(-5.0);
+                }
+                if ui.button(self.t("Zoom in")).clicked() {
+                    self.mpv.set_video_zoom(self.mpv.video_zoom() + 0.01);
+                }
+                if ui.button(self.t("Zoom out")).clicked() {
+                    self.mpv.set_video_zoom(self.mpv.video_zoom() - 0.01);
+                }
+            });
+            ui.menu_button(self.t("Increasing image quality"), |ui| {
+                if ui.button(self.t("Disable")).clicked() {
+                    self.disable_anime4k();
+                }
+                for quality in anime4k::QUALITIES {
+                    ui.menu_button(format!("{} {quality}", self.t("Quality")), |ui| {
+                        for mode in anime4k::MODES {
+                            if ui.button(format!("{} {mode}", self.t("Mode"))).clicked() {
+                                self.apply_anime4k(quality, mode);
                             }
                         }
                     });
-                    if ui.button(self.t("Volume +10")).clicked() {
-                        self.player.volume_up(&*self.mpv);
-                    }
-                    if ui.button(self.t("Volume -10")).clicked() {
-                        self.player.volume_down(&*self.mpv);
-                    }
-                    if ui.button(self.t("Rewind +5 sec")).clicked() {
-                        self.mpv.seek(5.0);
-                    }
-                    if ui.button(self.t("Rewind -5 sec")).clicked() {
-                        self.mpv.seek(-5.0);
-                    }
-                    if ui.button(self.t("Zoom in")).clicked() {
-                        self.mpv.set_video_zoom(self.mpv.video_zoom() + 0.01);
-                    }
-                    if ui.button(self.t("Zoom out")).clicked() {
-                        self.mpv.set_video_zoom(self.mpv.video_zoom() - 0.01);
-                    }
-                });
-                ui.menu_button(self.t("Increasing image quality"), |ui| {
-                    if ui.button(self.t("Disable")).clicked() {
-                        self.disable_anime4k();
-                    }
-                    for quality in anime4k::QUALITIES {
-                        ui.menu_button(format!("{} {quality}", self.t("Quality")), |ui| {
-                            for mode in anime4k::MODES {
-                                if ui.button(format!("{} {mode}", self.t("Mode"))).clicked() {
-                                    self.apply_anime4k(quality, mode);
-                                }
-                            }
-                        });
-                    }
-                    ui.menu_button(format!("{} HQ", self.t("Quality")), |ui| {
-                        let mut names: Vec<String> = anime4k::ultra_hq_presets()
-                            .keys()
-                            .map(|s| s.to_string())
-                            .collect();
-                        names.sort();
-                        for name in names {
-                            if ui.button(format!("{} {name}", self.t("Mode"))).clicked() {
-                                self.apply_anime4k_hq(&name);
-                            }
+                }
+                ui.menu_button(format!("{} HQ", self.t("Quality")), |ui| {
+                    let mut names: Vec<String> = anime4k::ultra_hq_presets()
+                        .keys()
+                        .map(|s| s.to_string())
+                        .collect();
+                    names.sort();
+                    for name in names {
+                        if ui.button(format!("{} {name}", self.t("Mode"))).clicked() {
+                            self.apply_anime4k_hq(&name);
                         }
-                    });
-                });
-                ui.menu_button(self.t("Other"), |ui| {
-                    if ui.button(self.t("Playlist")).clicked() {
-                        self.playlist_visible = !self.playlist_visible;
-                    }
-                    if ui.button(self.t("Take a screenshot")).clicked() {
-                        self.show_screenshot = true;
-                    }
-                    if ui.button(self.t("Settings")).clicked() {
-                        self.open_settings();
-                    }
-                    if ui.button(self.t("Launch parameters")).clicked() {
-                        self.open_launch();
-                    }
-                    if ui.button(self.t("Create config for Android")).clicked() {
-                        self.show_android = true;
-                    }
-                    if ui.button(self.t("Reference")).clicked() {
-                        self.show_reference = true;
-                    }
-                    if ui.button(self.t("About")).clicked() {
-                        self.show_about = true;
                     }
                 });
+            });
+            ui.menu_button(self.t("Other"), |ui| {
+                if ui.button(self.t("Playlist")).clicked() {
+                    self.playlist_visible = !self.playlist_visible;
+                }
+                if ui.button(self.t("Take a screenshot")).clicked() {
+                    self.show_screenshot = true;
+                }
+                if ui.button(self.t("Settings")).clicked() {
+                    self.open_settings();
+                }
+                if ui.button(self.t("Launch parameters")).clicked() {
+                    self.open_launch();
+                }
+                if ui.button(self.t("Create config for Android")).clicked() {
+                    self.show_android = true;
+                }
+                if ui.button(self.t("Reference")).clicked() {
+                    self.show_reference = true;
+                }
+                if ui.button(self.t("About")).clicked() {
+                    self.show_about = true;
+                }
             });
         });
     }
@@ -402,119 +445,148 @@ impl Anime4KPlayerApp {
 
     pub(crate) fn controls_panel(&mut self, ui: &mut egui::Ui) {
         egui::Panel::bottom("controls").show(ui, |ui| {
-            let duration = self.snap.duration.unwrap_or(0.0);
-            let pos = self.snap.time_pos.unwrap_or(0.0);
-            let max = (duration * TIME_SCALE).max(1.0);
-            let mut slider_val = pos * TIME_SCALE;
-
-            // Row 1: full-width seek bar, times pinned to the window edges.
-            ui.horizontal(|ui| {
-                ui.monospace(fmt_time(pos));
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.monospace(fmt_time(duration));
-                    ui.spacing_mut().slider_width = ui.available_width();
-                    let resp = ui
-                        .add(
-                            egui::Slider::new(&mut slider_val, 0.0..=max)
-                                .show_value(false)
-                                .trailing_fill(true)
-                                .step_by(0.5),
-                        )
-                        .on_hover_text(format!("{} / {}", fmt_time(pos), fmt_time(duration)));
-                    // Seek on real gestures only — NEVER on bare `changed()`.
-                    // With `step_by` the slider rounds the live `time-pos`
-                    // back into `slider_val` every frame (`slider.rs`:
-                    // `set_value` rounds to the step grid, `add_contents`
-                    // then marks `changed`), so `changed()` is true on
-                    // every frame without any user input. Seeking there
-                    // resets the demuxer/decoder continuously: video crawls
-                    // frame-by-frame, audio chops into seek-bounded pieces
-                    // and playback eventually wedges. `dragged` covers
-                    // scrubbing, `clicked` covers click-to-jump; rounding
-                    // alone triggers neither.
-                    if resp.dragged() || resp.clicked() {
-                        let new_pos = slider_val / TIME_SCALE;
-                        self.mpv.set_time_pos(new_pos);
-                        // Optimistic: don't wait for the next poll tick.
-                        self.snap.time_pos = Some(new_pos);
-                    }
-                });
-            });
-            ui.horizontal(|ui| {
-                if ui
-                    .button("⏮")
-                    .on_hover_text(self.t("Previous file"))
-                    .clicked()
-                {
-                    let ctx = ui.ctx().clone();
-                    self.do_prev(&ctx);
-                }
-                let playing = !self.snap.pause && self.snap.duration.is_some();
-                let play_tip = if playing {
-                    self.t("Pause")
-                } else {
-                    self.t("Play")
-                };
-                if ui
-                    .button(if playing { "⏸" } else { "▶" })
-                    .on_hover_text(play_tip)
-                    .clicked()
-                {
-                    self.toggle_play();
-                }
-                if ui.button("⏭").on_hover_text(self.t("Next file")).clicked() {
-                    let ctx = ui.ctx().clone();
-                    self.do_next(&ctx);
-                }
-                if ui.button("⛶").on_hover_text(self.t("Fullscreen")).clicked() {
-                    let ctx = ui.ctx().clone();
-                    self.toggle_fullscreen(&ctx);
-                }
-                if ui
-                    .button("🎵")
-                    .on_hover_text(self.t("Soundtrack"))
-                    .clicked()
-                {
-                    self.show_audio_menu = !self.show_audio_menu;
-                    self.show_sub_menu = false;
-                }
-                if ui.button("💬").on_hover_text(self.t("Subtitles")).clicked() {
-                    self.show_sub_menu = !self.show_sub_menu;
-                    self.show_audio_menu = false;
-                }
-                if ui.button("☰").on_hover_text(self.t("Menu")).clicked() {
-                    self.playlist_visible = !self.playlist_visible;
-                }
-
-                let mut vol = self.snap.volume;
-                let vmax = self.player.max_volume_self();
-                let vol_resp = ui
-                    .add(egui::Slider::new(&mut vol, 0..=vmax).show_value(false))
-                    .on_hover_text(format!("{}: {}%", self.t("Volume level"), vol));
-                if vol_resp.changed() {
-                    self.player.set_volume(&*self.mpv, vol);
-                    // Optimistic: don't wait for the next poll tick.
-                    self.snap.volume = self.player.volume;
-                    self.config.set("volume", json!(self.player.volume));
-                }
-                // Slider drags fire `changed()` every frame: flush once on
-                // release instead of writing config.json continuously.
-                if vol_resp.drag_stopped() {
-                    self.flush_config();
-                }
-                ui.monospace(format!("{}%", self.player.volume))
-                    .on_hover_text(self.t("Volume level"));
-            });
-            ui.horizontal(|ui| {
-                ui.monospace(self.media_info());
-            });
-            if self.show_audio_menu {
-                self.track_menu(ui, TrackKind::Audio);
-            }
-            if self.show_sub_menu {
-                self.track_menu(ui, TrackKind::Sub);
-            }
+            self.controls_contents(ui);
         });
+    }
+
+    /// Нижняя панель поверх видео для фулскрина: лежит на картинке на
+    /// слегка прозрачной подложке вместо того, чтобы сжимать видео вверх
+    /// (обычный `Panel::bottom` отнимает место у `CentralPanel`).
+    pub(crate) fn controls_overlay(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let width = ctx.viewport_rect().width().max(0.0);
+        egui::Area::new(egui::Id::new("controls_overlay"))
+            .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, 0.0))
+            .order(egui::Order::Foreground)
+            .movable(false)
+            .show(&ctx, |ui| {
+                let fill = Self::overlay_fill(ui);
+                egui::Frame::NONE
+                    .fill(fill)
+                    .inner_margin(egui::Margin::symmetric(8, 6))
+                    .show(ui, |ui| {
+                        let w = (width - 16.0).max(0.0);
+                        ui.set_min_width(w);
+                        ui.set_max_width(w);
+                        self.controls_contents(ui);
+                    });
+            });
+    }
+
+    /// Содержимое нижней панели (общее для `controls_panel` и оверлея).
+    pub(crate) fn controls_contents(&mut self, ui: &mut egui::Ui) {
+        let duration = self.snap.duration.unwrap_or(0.0);
+        let pos = self.snap.time_pos.unwrap_or(0.0);
+        let max = (duration * TIME_SCALE).max(1.0);
+        let mut slider_val = pos * TIME_SCALE;
+
+        // Row 1: full-width seek bar, times pinned to the window edges.
+        ui.horizontal(|ui| {
+            ui.monospace(fmt_time(pos));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.monospace(fmt_time(duration));
+                ui.spacing_mut().slider_width = ui.available_width();
+                let resp = ui
+                    .add(
+                        egui::Slider::new(&mut slider_val, 0.0..=max)
+                            .show_value(false)
+                            .trailing_fill(true)
+                            .step_by(0.5),
+                    )
+                    .on_hover_text(format!("{} / {}", fmt_time(pos), fmt_time(duration)));
+                // Seek on real gestures only — NEVER on bare `changed()`.
+                // With `step_by` the slider rounds the live `time-pos`
+                // back into `slider_val` every frame (`slider.rs`:
+                // `set_value` rounds to the step grid, `add_contents`
+                // then marks `changed`), so `changed()` is true on
+                // every frame without any user input. Seeking there
+                // resets the demuxer/decoder continuously: video crawls
+                // frame-by-frame, audio chops into seek-bounded pieces
+                // and playback eventually wedges. `dragged` covers
+                // scrubbing, `clicked` covers click-to-jump; rounding
+                // alone triggers neither.
+                if resp.dragged() || resp.clicked() {
+                    let new_pos = slider_val / TIME_SCALE;
+                    self.mpv.set_time_pos(new_pos);
+                    // Optimistic: don't wait for the next poll tick.
+                    self.snap.time_pos = Some(new_pos);
+                }
+            });
+        });
+        ui.horizontal(|ui| {
+            if ui
+                .button("⏮")
+                .on_hover_text(self.t("Previous file"))
+                .clicked()
+            {
+                let ctx = ui.ctx().clone();
+                self.do_prev(&ctx);
+            }
+            let playing = !self.snap.pause && self.snap.duration.is_some();
+            let play_tip = if playing {
+                self.t("Pause")
+            } else {
+                self.t("Play")
+            };
+            if ui
+                .button(if playing { "⏸" } else { "▶" })
+                .on_hover_text(play_tip)
+                .clicked()
+            {
+                self.toggle_play();
+            }
+            if ui.button("⏭").on_hover_text(self.t("Next file")).clicked() {
+                let ctx = ui.ctx().clone();
+                self.do_next(&ctx);
+            }
+            if ui.button("⛶").on_hover_text(self.t("Fullscreen")).clicked() {
+                let ctx = ui.ctx().clone();
+                self.toggle_fullscreen(&ctx);
+            }
+            if ui
+                .button("🎵")
+                .on_hover_text(self.t("Soundtrack"))
+                .clicked()
+            {
+                self.show_audio_menu = !self.show_audio_menu;
+                self.show_sub_menu = false;
+            }
+            if ui.button("💬").on_hover_text(self.t("Subtitles")).clicked() {
+                self.show_sub_menu = !self.show_sub_menu;
+                self.show_audio_menu = false;
+            }
+            if ui.button("☰").on_hover_text(self.t("Menu")).clicked() {
+                self.playlist_visible = !self.playlist_visible;
+            }
+
+            let mut vol = self.snap.volume;
+            let vmax = self.player.max_volume_self();
+            let vol_resp = ui
+                .add(egui::Slider::new(&mut vol, 0..=vmax).show_value(false))
+                .on_hover_text(format!("{}: {}%", self.t("Volume level"), vol));
+            if vol_resp.changed() {
+                self.player.set_volume(&*self.mpv, vol);
+                // Optimistic: don't wait for the next poll tick.
+                self.snap.volume = self.player.volume;
+                self.config.set("volume", json!(self.player.volume));
+            }
+            // Slider drags fire `changed()` every frame: flush once on
+            // release instead of writing config.json continuously.
+            if vol_resp.drag_stopped() {
+                self.flush_config();
+            }
+            ui.monospace(format!("{}%", self.player.volume))
+                .on_hover_text(self.t("Volume level"));
+        });
+        ui.horizontal(|ui| {
+            ui.monospace(self.media_info());
+        });
+        if self.show_audio_menu {
+            self.track_menu(ui, TrackKind::Audio);
+        }
+        if self.show_sub_menu {
+            self.track_menu(ui, TrackKind::Sub);
+        }
     }
 
     pub(crate) fn track_menu(&mut self, ui: &mut egui::Ui, kind: TrackKind) {
@@ -610,72 +682,102 @@ impl Anime4KPlayerApp {
         egui::Panel::right("playlist")
             .size_range(MIN_WIDTH..=max_width)
             .show(ui, |ui| {
-                ui.heading(self.t("Playlist"));
-                let names = self.player.filenames_only();
-                let current = self.player.current;
-                let mut chosen: Option<usize> = None;
-                // NB: a vertical ScrollArea shrinks horizontally to fit its
-                // content by default. The panel frame then covers only the
-                // text width and anything dragged wider stays unpainted
-                // (black strip). Forcing full width keeps the frame over
-                // the whole allocation.
-                egui::ScrollArea::vertical()
-                    .auto_shrink([false, false])
+                self.playlist_contents(ui);
+            });
+    }
+
+    /// Плейлист поверх видео для фулскрина: выезжает справа на слегка
+    /// прозрачной подложке и не сжимает картинку (см. `controls_overlay`).
+    pub(crate) fn playlist_overlay(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        let vp = ctx.viewport_rect();
+        let width = OVERLAY_PLAYLIST_WIDTH.min(vp.width()).max(0.0);
+        let height = vp.height().max(0.0);
+        egui::Area::new(egui::Id::new("playlist_overlay"))
+            .anchor(egui::Align2::RIGHT_CENTER, egui::vec2(0.0, 0.0))
+            .order(egui::Order::Foreground)
+            .movable(false)
+            .show(&ctx, |ui| {
+                let fill = Self::overlay_fill(ui);
+                egui::Frame::NONE
+                    .fill(fill)
+                    .inner_margin(egui::Margin::same(8))
                     .show(ui, |ui| {
-                        // Stretch rows across the full width so the highlight
-                        // and the frame cover the whole panel, not just text.
-                        ui.set_width(ui.available_width());
-                        for (i, name) in names.iter().enumerate() {
-                            let selected = current == Some(i);
-                            if ui.selectable_label(selected, name).clicked() {
-                                chosen = Some(i);
-                            }
-                        }
+                        let (w, h) = ((width - 16.0).max(0.0), (height - 16.0).max(0.0));
+                        ui.set_min_width(w);
+                        ui.set_max_width(w);
+                        ui.set_min_height(h);
+                        ui.set_max_height(h);
+                        self.playlist_contents(ui);
                     });
-                if let Some(i) = chosen {
-                    let ctx = ui.ctx().clone();
-                    self.do_play_index(&ctx, i);
+            });
+    }
+
+    /// Содержимое плейлиста (общее для `playlist_panel` и оверлея).
+    pub(crate) fn playlist_contents(&mut self, ui: &mut egui::Ui) {
+        ui.heading(self.t("Playlist"));
+        let names = self.player.filenames_only();
+        let current = self.player.current;
+        let mut chosen: Option<usize> = None;
+        // NB: a vertical ScrollArea shrinks horizontally to fit its
+        // content by default. The panel frame then covers only the
+        // text width and anything dragged wider stays unpainted
+        // (black strip). Forcing full width keeps the frame over
+        // the whole allocation.
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                // Stretch rows across the full width so the highlight
+                // and the frame cover the whole panel, not just text.
+                ui.set_width(ui.available_width());
+                for (i, name) in names.iter().enumerate() {
+                    let selected = current == Some(i);
+                    if ui.selectable_label(selected, name).clicked() {
+                        chosen = Some(i);
+                    }
                 }
-                // List above, source info pinned to the bottom: the scroll
-                // area fills only the *remaining* height, so the footer can
-                // never overflow the panel into the controls bar.
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    // Source info: folder path, or "URL" for links.
-                    // Truncated: with the width capped, a long path must not
-                    // paint past the panel frame.
-                    if let Some(cur) = self.player.current_file() {
-                        let s = cur.to_string_lossy();
-                        if is_url_like(&s) {
-                            ui.monospace("URL");
-                        } else if let Some(parent) = cur.parent() {
-                            ui.add(
-                                egui::Label::new(
-                                    egui::RichText::new(parent.to_string_lossy()).monospace(),
-                                )
-                                .truncate(),
-                            );
+            });
+        if let Some(i) = chosen {
+            let ctx = ui.ctx().clone();
+            self.do_play_index(&ctx, i);
+        }
+        // List above, source info pinned to the bottom: the scroll
+        // area fills only the *remaining* height, so the footer can
+        // never overflow the panel into the controls bar.
+        ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
+            // Source info: folder path, or "URL" for links.
+            // Truncated: with the width capped, a long path must not
+            // paint past the panel frame.
+            if let Some(cur) = self.player.current_file() {
+                let s = cur.to_string_lossy();
+                if is_url_like(&s) {
+                    ui.monospace("URL");
+                } else if let Some(parent) = cur.parent() {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(parent.to_string_lossy()).monospace())
+                            .truncate(),
+                    );
+                }
+            }
+            // NB: a vertical ScrollArea shrinks horizontally to fit
+            // its content by default. The panel frame then covers
+            // only the text width and anything dragged wider stays
+            // unpainted (black strip). Forcing full width keeps the
+            // frame over the whole allocation.
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    // Stretch rows across the full width so the
+                    // highlight and the frame cover the whole panel,
+                    // not just text.
+                    ui.set_width(ui.available_width());
+                    for (i, name) in names.iter().enumerate() {
+                        let selected = current == Some(i);
+                        if ui.selectable_label(selected, name).clicked() {
+                            chosen = Some(i);
                         }
                     }
-                    // NB: a vertical ScrollArea shrinks horizontally to fit
-                    // its content by default. The panel frame then covers
-                    // only the text width and anything dragged wider stays
-                    // unpainted (black strip). Forcing full width keeps the
-                    // frame over the whole allocation.
-                    egui::ScrollArea::vertical()
-                        .auto_shrink([false, false])
-                        .show(ui, |ui| {
-                            // Stretch rows across the full width so the
-                            // highlight and the frame cover the whole panel,
-                            // not just text.
-                            ui.set_width(ui.available_width());
-                            for (i, name) in names.iter().enumerate() {
-                                let selected = current == Some(i);
-                                if ui.selectable_label(selected, name).clicked() {
-                                    chosen = Some(i);
-                                }
-                            }
-                        });
                 });
-            });
+        });
     }
 }

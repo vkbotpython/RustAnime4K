@@ -69,27 +69,44 @@ impl eframe::App for Anime4KPlayerApp {
             ctx.output_mut(|o| o.cursor_icon = egui::CursorIcon::None);
         }
 
-        if !hide_chrome {
+        if self.player.fullscreen {
+            // Кинотеатральный фулскрин: видео забирает весь вьюпорт, а хром
+            // рисуется поверх него полупрозрачными оверлеями. Обычные Panels
+            // отняли бы место у CentralPanel и сдвинули бы картинку
+            // вверх/вбок при каждом появлении панели.
+            let fixed = self.fixed_panel();
+            let show_menu = fixed;
+            let show_playlist = self.playlist_visible && (fixed || self.mouse_in_right_zone(&ctx));
+            let show_controls = fixed || self.mouse_in_bottom_zone(&ctx);
+            let video_start = Instant::now();
+            self.video_panel(ui);
+            let video_dt = video_start.elapsed().as_secs_f64() * 1000.0;
+            self.video_ms_ema += (video_dt - self.video_ms_ema) * 0.1;
+            if show_menu {
+                self.menu_overlay(ui);
+            }
+            if show_playlist {
+                self.playlist_overlay(ui);
+            }
+            if show_controls {
+                self.controls_overlay(ui);
+            }
+        } else {
             self.menu_bar(ui);
-        }
-        // egui order: top, side, bottom, central. The playlist docks
-        // full-height on the right on purpose: sharing only a clean
-        // T-junction with the bottom bar makes any overlap between them
-        // structurally impossible (a side panel stacked *above* the bottom
-        // bar kept bleeding its separator into it).
-        let show_playlist =
-            self.playlist_visible && (!hide_chrome || self.mouse_in_right_zone(&ctx));
-        if show_playlist {
-            self.playlist_panel(ui);
-        }
-        let show_controls = !hide_chrome || self.mouse_in_bottom_zone(&ctx);
-        if show_controls {
+            // egui order: top, side, bottom, central. The playlist docks
+            // full-height on the right on purpose: sharing only a clean
+            // T-junction with the bottom bar makes any overlap between them
+            // structurally impossible (a side panel stacked *above* the bottom
+            // bar kept bleeding its separator into it).
+            if self.playlist_visible {
+                self.playlist_panel(ui);
+            }
             self.controls_panel(ui);
+            let video_start = Instant::now();
+            self.video_panel(ui);
+            let video_dt = video_start.elapsed().as_secs_f64() * 1000.0;
+            self.video_ms_ema += (video_dt - self.video_ms_ema) * 0.1;
         }
-        let video_start = Instant::now();
-        self.video_panel(ui);
-        let video_dt = video_start.elapsed().as_secs_f64() * 1000.0;
-        self.video_ms_ema += (video_dt - self.video_ms_ema) * 0.1;
         self.dialogs(&ctx);
         let frame_dt = frame_start.elapsed().as_secs_f64() * 1000.0;
         self.ui_ms_ema += (frame_dt - self.ui_ms_ema) * 0.05;
