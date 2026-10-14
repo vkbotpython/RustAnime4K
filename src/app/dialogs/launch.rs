@@ -39,47 +39,48 @@ impl Anime4KPlayerApp {
                     ui.monospace("volume=50");
                     hint(ui, "name=value");
                 });
-                // Buttons pinned to the bottom, editor with a FIXED height.
-                // Sizing the editor from `available_size().y` feeds back
-                // into the auto-sized window (bigger editor -> bigger
-                // window -> bigger available -> ... until the screen edge).
-                const EDITOR_HEIGHT: f32 = 240.0;
-                ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
-                    ui.horizontal(|ui| {
-                        if ui.button(apply_label).clicked() {
-                            let mut ok = true;
-                            for (name, value) in
-                                parse_launch_params(&self.launch_params_text.clone())
-                            {
-                                if name == "volume" {
-                                    if let Ok(v) = value.parse::<i32>() {
-                                        self.player.set_volume(&*self.mpv, v);
-                                    } else {
-                                        ok = false;
-                                    }
+                // Top-down order with the editor LAST, filling the rest of
+                // the window: buttons first, then the stretching editor.
+                // Anything else feeds back into the auto-sized window: a
+                // fill-sized editor with widgets after it (or a `bottom_up`
+                // region) makes the content larger than the window every
+                // frame until the screen edge, while a fixed editor snaps a
+                // manual resize back. Laid out last, the editor is exactly
+                // the remaining space at any window size: stable on open,
+                // stretchable by dragging.
+                ui.horizontal(|ui| {
+                    if ui.button(apply_label).clicked() {
+                        let mut ok = true;
+                        for (name, value) in parse_launch_params(&self.launch_params_text.clone()) {
+                            if name == "volume" {
+                                if let Ok(v) = value.parse::<i32>() {
+                                    self.player.set_volume(&*self.mpv, v);
                                 } else {
-                                    self.mpv.set_option_str(&name, &value);
+                                    ok = false;
                                 }
+                            } else {
+                                self.mpv.set_option_str(&name, &value);
                             }
-                            saved = true;
-                            applied_ok = Some(ok);
                         }
-                        if ui.button(save_label).clicked() {
-                            saved = true;
-                        }
-                        if ui.button(cancel_label).clicked() {
-                            // Discard the draft on Cancel.
-                            cancelled = true;
-                        }
-                    });
-                    let width = ui.available_width();
-                    ui.add_sized(
-                        egui::vec2(width, EDITOR_HEIGHT),
-                        egui::TextEdit::multiline(&mut self.launch_params_text)
-                            .font(egui::TextStyle::Monospace)
-                            .hint_text("name=value"),
-                    );
+                        saved = true;
+                        applied_ok = Some(ok);
+                    }
+                    if ui.button(save_label).clicked() {
+                        saved = true;
+                    }
+                    if ui.button(cancel_label).clicked() {
+                        // Discard the draft on Cancel.
+                        cancelled = true;
+                    }
                 });
+                ui.add_space(4.0);
+                let avail = ui.available_size();
+                ui.add_sized(
+                    egui::vec2(avail.x, avail.y.max(120.0)),
+                    egui::TextEdit::multiline(&mut self.launch_params_text)
+                        .font(egui::TextStyle::Monospace)
+                        .hint_text("name=value"),
+                );
             });
         if cancelled {
             self.launch_params_text = get_str(&self.config, "launchParameters").unwrap_or_default();
