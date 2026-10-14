@@ -6,16 +6,20 @@
 #   ./build.sh --no-video         # без libmpv (только mock-бэкенд)
 #   ./build.sh --skip-checks       # пропустить fmt/clippy/test
 #   ./build.sh --no-package       # только target/release без dist
+#   ./build.sh --installer        # + install.sh в пакете: согласие с LICENSE,
+#                               #   выбор каталога, ярлык в меню, ссылка в ~/.local/bin
 set -euo pipefail
 
 NO_VIDEO=0
 SKIP_CHECKS=0
 NO_PACKAGE=0
+INSTALLER=0
 for arg in "$@"; do
   case "$arg" in
     --no-video) NO_VIDEO=1 ;;
     --skip-checks) SKIP_CHECKS=1 ;;
     --no-package) NO_PACKAGE=1 ;;
+    --installer) INSTALLER=1 ;;
     -h|--help)
       sed -n '2,10p' "$0"
       exit 0
@@ -83,6 +87,67 @@ if [ "$NO_PACKAGE" -eq 0 ]; then
   # и favicon.ico (нужен только build.rs и инсталлятору) не кладём.
   cp -r assets/shaders dist/anime4k-player/
   cp packaging/linux/*.desktop README.md LICENSE dist/anime4k-player/
+  if [ "$INSTALLER" -eq 1 ]; then
+    step 'Генерация dist/anime4k-player/install.sh'
+    cat > dist/anime4k-player/install.sh <<'INSTALLER_EOF'
+#!/bin/bash
+# Anime4K Player — интерактивный установщик для Linux.
+# Показывает LICENSE и просит согласие, спрашивает каталог установки,
+# копирует файлы, ставит .desktop-ярлык и ссылку в ~/.local/bin.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+echo '=== Лицензия (GPL-3.0-or-later) ==='
+if command -v less >/dev/null 2>&1; then
+  less LICENSE
+else
+  cat LICENSE
+fi
+read -rp 'Принимаете условия лицензии? [y/N] ' answer
+case "$answer" in
+  [yY]|[yY][eE][sS]|[dD]|[дД]*) ;;
+  *) echo 'Установка отменена.'; exit 1 ;;
+esac
+
+default_dir="$HOME/.local/anime4k-player"
+read -rp "Каталог установки [$default_dir]: " prefix
+prefix="${prefix:-$default_dir}"
+case "$prefix" in
+  "$PWD"|"$PWD"/*) echo "Нельзя устанавливать внутрь самого пакета ($PWD). Выберите другой каталог."; exit 1 ;;
+esac
+mkdir -p "$prefix"
+for f in *; do
+  [ "$f" = install.sh ] || cp -r "$f" "$prefix/"
+done
+
+read -rp 'Создать ярлык в меню приложений? [Y/n] ' shortcut
+case "$shortcut" in
+  [nN]|[nN][oO]|[нН]*) echo 'Ярлык пропущен.' ;;
+  *)
+    apps_dir="$HOME/.local/share/applications"
+    mkdir -p "$apps_dir"
+    sed -e "s|^Exec=.*|Exec=$prefix/anime4k-player|" \
+        -e "s|^Icon=.*|Icon=$prefix/favicon.ico|" \
+        io.github.avencores.Anime4KPlayer.desktop > "$apps_dir/io.github.avencores.Anime4KPlayer.desktop"
+    echo "Ярлык: $apps_dir/io.github.avencores.Anime4KPlayer.desktop"
+    ;;
+esac
+
+read -rp 'Добавить запуск через ~/.local/bin/anime4k-player? [Y/n] ' add_bin
+case "$add_bin" in
+  [nN]|[nN][oO]|[нН]*) echo 'Ссылка пропущена.' ;;
+  *)
+    mkdir -p "$HOME/.local/bin"
+    ln -sf "$prefix/anime4k-player" "$HOME/.local/bin/anime4k-player"
+    echo 'Ссылка: ~/.local/bin/anime4k-player (проверьте, что ~/.local/bin в PATH)'
+    ;;
+esac
+
+echo "Готово: Anime4K Player установлен в $prefix"
+INSTALLER_EOF
+    chmod +x dist/anime4k-player/install.sh
+    echo "Установщик: $PWD/dist/anime4k-player/install.sh (войдёт и в tar-архив)"
+  fi
   if [ "$NO_VIDEO" -eq 0 ]; then
     # Bundle libmpv.so + приватные зависимости (цепочка ffmpeg, ...).
     # Хостовые стеки (glibc, X11/Wayland, Mesa/GL, DRM) исключаются.
@@ -117,6 +182,9 @@ if [ "$NO_PACKAGE" -eq 0 ]; then
   fi
   echo "Готово: $PWD/dist/anime4k-player"
 else
+  if [ "$INSTALLER" -eq 1 ]; then
+    echo '--installer требует пакета (уберите --no-package)'; exit 1
+  fi
   echo 'Пакет пропущен (--no-package). Бинарь: target/release/anime4k-player'
 fi
 

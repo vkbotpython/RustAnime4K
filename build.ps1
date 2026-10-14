@@ -7,6 +7,11 @@
   fmt + clippy + test, затем cargo build --release [--features video],
   smoke-тест (--help) и сборка папки dist/anime4k-player (exe + libmpv-2.dll
   + shaders + README + LICENSE).
+  С флагом -Installer дополнительно собирается Inno Setup-установщик
+  (anime4k-player-windows-x86_64-setup.exe в корне репо): полный визард
+  с согласием с лицензией (LICENSE), выбором каталога установки, папкой
+  в меню «Пуск», ярлыком и ассоциациями медиафайлов. Требуется Inno Setup 6
+  (ISCC.exe): winget install -e --id JRSoftware.InnoSetup.
   Для линковки фичи video используется готовый mpvlib-local/mpv.lib, путь
   к нему задан в одном месте — .cargo/config.toml (build.rustflags),
   поэтому одинаков у ручных `cargo ...` и у скриптов. Иначе cargo
@@ -21,6 +26,8 @@
   .\build.ps1 -NoVideo
   .\build.ps1 -SkipChecks -NoPackage
   .\build.ps1 -Zip
+  .\build.ps1 -Installer
+  .\build.ps1 -Zip -Installer
   .\build.ps1 -MpvDll C:\mpv\libmpv-2.dll
   .\build.ps1 -DownloadMpv
 #>
@@ -30,6 +37,7 @@ param(
   [switch]$SkipChecks,
   [switch]$NoPackage,
   [switch]$Zip,
+  [switch]$Installer,
   [string]$MpvDll = "",
   [switch]$DownloadMpv
 )
@@ -224,6 +232,36 @@ if (-not $NoPackage) {
   }
 } else {
   Write-Host "Пакет пропущен (-NoPackage). Бинарь: $Exe"
+}
+
+# --- 5. Inno Setup installer (опционально, -Installer) ------------------------
+# Берёт exe (+ libmpv-2.dll, если есть) из target/release и ассеты из репо,
+# поэтому работает и с -NoPackage. Версия визарда подставляется из Cargo.toml.
+if ($Installer) {
+  Step 'Сборка установщика (Inno Setup)'
+  $ISCC = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+  if (-not (Test-Path $ISCC)) {
+    $found = Get-Command ISCC -ErrorAction SilentlyContinue
+    if ($found) { $ISCC = $found.Source }
+  }
+  if (-not (Test-Path $ISCC)) {
+    throw 'ISCC.exe (Inno Setup 6) не найден. Установи: winget install -e --id JRSoftware.InnoSetup'
+  }
+  $Ver = '1.0.0'
+  $m = [regex]::Match(
+    (Get-Content (Join-Path $RepoRoot 'Cargo.toml') -Raw),
+    '(?m)^version\s*=\s*"([^"]+)"')
+  if ($m.Success) { $Ver = $m.Groups[1].Value }
+  Write-Host "Версия установщика: $Ver"
+  $Iss = Join-Path $RepoRoot 'packaging\windows\installer.iss'
+  & $ISCC "/DMyAppVersion=$Ver" $Iss
+  if ($LASTEXITCODE -ne 0) { throw 'ISCC failed' }
+  $SetupSrc = Get-ChildItem (Join-Path $RepoRoot 'packaging\windows\Output\*.exe') |
+    Select-Object -First 1
+  if (-not $SetupSrc) { throw 'установщик не собран (нет exe в packaging/windows/Output)' }
+  $SetupDst = Join-Path $RepoRoot 'anime4k-player-windows-x86_64-setup.exe'
+  Move-Item $SetupSrc.FullName $SetupDst -Force
+  Write-Host "Установщик: $SetupDst"
 }
 
 Write-Host ''

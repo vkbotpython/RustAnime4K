@@ -106,10 +106,10 @@ src/
     widgets.rs   карточки, бейджи, секции
   theme.rs     палитры + тема + стили egui
 build.rs       иконка exe через winres (только Windows)
-build.ps1      локальная сборка Windows (проверки + release + dist)
-build.sh       локальная сборка Linux (проверки + release + dist)
+build.ps1      локальная сборка Windows (проверки + release + dist + -Installer/-Zip)
+build.sh       локальная сборка Linux (проверки + release + dist + --installer)
 assets/        shaders/ images/ docs/ favicon.ico + i18n/*.json
-packaging/     windows/installer.iss + linux/.desktop
+packaging/     windows/installer.iss (Inno Setup: лицензия, каталог, ярлыки) + linux/.desktop
 .github/       workflows/ci.yml + release.yml
 ```
 
@@ -149,11 +149,18 @@ packaging/     windows/installer.iss + linux/.desktop
 .\build.ps1 -SkipChecks  # пропустить fmt/clippy/test
 .\build.ps1 -NoPackage   # только target/release без dist
 .\build.ps1 -Zip         # + zip-архив как в CI
+.\build.ps1 -Installer   # + Inno Setup-установщик (anime4k-player-windows-x86_64-setup.exe):
+                         #   согласие с LICENSE, выбор каталога, меню «Пуск», ярлык,
+                         #   ассоциации медиафайлов. Нужен Inno Setup 6:
+                         #   winget install -e --id JRSoftware.InnoSetup
+.\build.ps1 -Zip -Installer # портативный архив и установщик рядом
 .\build.ps1 -DownloadMpv # скачать mpv-dev и собрать mpv.lib (нужны VS BuildTools + 7z)
 ```
 
 ```bash
 ./build.sh              # всё сразу (нужны libmpv-dev; для пакета — patchelf)
+./build.sh --installer  # + install.sh в пакете: согласие с LICENSE, выбор каталога,
+                        #   ярлык в меню приложений, ссылка в ~/.local/bin
 ./build.sh --no-video --no-package
 ```
 
@@ -233,8 +240,11 @@ audio-delay=0.15
 - `ci.yml`: `fmt --check` + `clippy -D warnings` + `cargo test` на
   Windows + Linux; плюс `cargo check/test --features video` на Linux.
   Джоба `build-release` собирает `--features video` с бандлингом libmpv —
-  её артефакты (`anime4k-player-Windows` / `anime4k-player-Linux`) и есть
-  рабочий плеер, качать из вкладки Actions.
+  её артефакты и есть рабочий плеер, качать из вкладки Actions:
+  Windows — портативный `anime4k-player-windows-x86_64.zip` **и**
+  установщик `anime4k-player-windows-x86_64-setup.exe` (визард: согласие
+  с лицензией, выбор каталога, ярлыки, ассоциации файлов);
+  Linux — `anime4k-player-linux-x86_64.tar.gz`.
 - `release.yml`: dormant, срабатывает только по тегу `v*` (сборка релизных
   бинарников + Inno Setup + публикация GitHub Release).
 
