@@ -3,10 +3,12 @@
 use super::helpers::{get_bool, missing_shader_files, pick_media_file, shaders_dir};
 use super::state::Anime4KPlayerApp;
 use super::state::PresetChoice;
+use super::state::{FAST_POLL_INTERVAL, MAX_FILE_PRESETS, SLOW_POLL_INTERVAL};
 use crate::anime4k;
-use serde_json::{Value, json};
+use crate::mpv::TrackKind;
+use serde_json::json;
 use std::path::Path;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 impl Anime4KPlayerApp {
     pub(crate) fn do_open_file(&mut self, ctx: &egui::Context) {
@@ -39,6 +41,12 @@ impl Anime4KPlayerApp {
         self.snap.duration = None;
         self.snap.time_pos = None;
         self.snap.pause = false;
+        self.snap_static_key = None;
+        self.tracks_count_cache = None;
+        self.tracks_file_key = None;
+        self.snap.tracks.clear();
+        self.snap.audio_rows.clear();
+        self.snap.sub_rows.clear();
         self.refresh_title(ctx);
     }
 
@@ -100,14 +108,10 @@ impl Anime4KPlayerApp {
     }
 
     pub(crate) fn write_file_preset(&mut self, key: &str, choice: &PresetChoice) {
-        let mut map = self
-            .config
-            .get("filePresets")
-            .and_then(Value::as_object)
-            .cloned()
-            .unwrap_or_default();
-        map.insert(key.to_string(), choice.to_json());
-        self.config.set("filePresets", Value::Object(map));
+        // In-place insert, no whole-table clone; bounded so the table
+        // cannot grow without limit (one key per opened file).
+        self.config
+            .set_nested_capped("filePresets", key, choice.to_json(), MAX_FILE_PRESETS);
         self.flush_config();
     }
 
@@ -181,6 +185,13 @@ impl Anime4KPlayerApp {
         self.snap.duration = None;
         self.snap.time_pos = None;
         self.snap.pause = self.mpv.pause();
+        // Static/track caches belong to the previous file.
+        self.snap_static_key = None;
+        self.tracks_count_cache = None;
+        self.tracks_file_key = None;
+        self.snap.tracks.clear();
+        self.snap.audio_rows.clear();
+        self.snap.sub_rows.clear();
         let Some(key) = self.current_file_key() else {
             self.show_preset_offer = false;
             return;
@@ -203,15 +214,22 @@ impl Anime4KPlayerApp {
         }
     }
 
-    /// Refreshes the mpv snapshot, time-gated to ~10 Hz. Between polls the
-    /// UI reuses cached values, so 24-60 fps repaint storms during playback
-    /// cost zero mpv round-trips. Transient read failures keep the last good
-    /// values instead of flickering the UI.
+    /// Refreshes the mpv snapshot in tiers. Between polls the UI reuses
+    /// cached values, so 24-60 fps repaint storms during playback cost few
+    /// mpv round-trips. Transient read failures keep the last good values
+    /// instead of flickering the UI.
+    ///
+    /// - fast (~10 Hz): `duration` (until known), `time-pos`, `pause`, `eof`.
+    /// - static (once per file, retried until metadata answers):
+    ///   `video-format`, `audio-codec`, `width`, `height`, `fps`, `hwdec`.
+    /// - slow (~0.7 Hz): `volume`, `frame-drop-count`, `paused-for-cache`.
+    /// - tracks (menus open only): refetched only when `track-list/count`
+    ///   changed or the file changed — never blindly every tick.
     pub(crate) fn poll_mpv(&mut self) {
         let now = Instant::now();
         if self
             .last_poll
-            .is_some_and(|last| now.duration_since(last) < Duration::from_millis(100))
+            .is_some_and(|last| now.duration_since(last) < FAST_POLL_INTERVAL)
         {
             return;
         }
@@ -223,8 +241,8 @@ impl Anime4KPlayerApp {
             self.snap.eof = false;
             return;
         }
-        // `duration` proves the core answered: only then is the `pause`
-        // read trustworthy enough to overwrite the cached value.
+        // Fast tier: `duration` proves the core answered — only then is the
+        // `pause` read trustworthy enough to overwrite the cached value.
         if let Some(d) = self.mpv.duration() {
             self.snap.duration = Some(d);
             self.snap.pause = self.mpv.pause();
@@ -233,19 +251,59 @@ impl Anime4KPlayerApp {
             self.snap.time_pos = Some(t);
         }
         self.snap.eof = self.mpv.eof_reached();
-        self.snap.volume = self.mpv.volume();
-        self.snap.video_format = self.mpv.video_format();
-        self.snap.audio_codec = self.mpv.audio_codec();
-        self.snap.width = self.mpv.width();
-        self.snap.height = self.mpv.height();
-        self.snap.fps = self.mpv.fps();
-        self.snap.frame_drops = self.mpv.frame_drop_count();
-        self.snap.cache_pause = self.mpv.paused_for_cache();
-        self.snap.hwdec = self.mpv.hwdec_current();
+        // Static tier: properties that never change within one file.
+        // Right after `loadfile` they read back as `None`: keep the key
+        // unset so the next tick retries instead of caching `None`s.
+        let key = self.current_file_key();
+        if key != self.snap_static_key {
+            self.snap.video_format = self.mpv.video_format();
+            self.snap.audio_codec = self.mpv.audio_codec();
+            self.snap.width = self.mpv.width();
+            self.snap.height = self.mpv.height();
+            self.snap.fps = self.mpv.fps();
+            self.snap.hwdec = self.mpv.hwdec_current();
+            if self.snap.duration.is_some() {
+                self.snap_static_key = key.clone();
+            }
+        }
+        // Slow tier: counters/flags nobody needs at 10 Hz.
+        if self
+            .last_slow_poll
+            .is_none_or(|last| now.duration_since(last) >= SLOW_POLL_INTERVAL)
+        {
+            self.last_slow_poll = Some(now);
+            self.snap.volume = self.mpv.volume();
+            self.snap.frame_drops = self.mpv.frame_drop_count();
+            self.snap.cache_pause = self.mpv.paused_for_cache();
+        }
+        // Tracks: menus open only, refetch on count/file change.
+        // The last list is kept otherwise (no per-tick clear).
         if self.show_audio_menu || self.show_sub_menu {
-            self.snap.tracks = self.mpv.tracks();
-        } else {
-            self.snap.tracks.clear();
+            let count = self.mpv.track_count();
+            if self.tracks_file_key != key || self.tracks_count_cache != Some(count) {
+                let tracks = self.mpv.tracks();
+                // Full labels are prebuilt once per refetch: the menu only
+                // iterates `&str` afterwards (zero per-frame `format!`).
+                self.snap.audio_rows = tracks
+                    .iter()
+                    .filter(|t| t.kind == TrackKind::Audio)
+                    .map(|t| {
+                        let text = t.display();
+                        (t.id, format!("{}) {text}", t.id))
+                    })
+                    .collect();
+                self.snap.sub_rows = tracks
+                    .iter()
+                    .filter(|t| t.kind == TrackKind::Sub)
+                    .map(|t| {
+                        let text = t.display();
+                        (t.id, format!("{}) {text}", t.id))
+                    })
+                    .collect();
+                self.snap.tracks = tracks;
+                self.tracks_count_cache = Some(count);
+                self.tracks_file_key = key;
+            }
         }
     }
 

@@ -30,6 +30,7 @@ impl eframe::App for Anime4KPlayerApp {
         // so repaint storms (every video frame) cost zero mpv round-trips.
         self.poll_mpv();
         self.flush_pending_preset();
+        self.flush_config_if_due();
         self.expire_status();
         if matches!(
             self.click_play_armed_at,

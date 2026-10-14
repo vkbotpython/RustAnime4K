@@ -219,6 +219,8 @@ pub fn resolve(config_value: Option<&str>) -> Lang {
 }
 
 /// Translates `key` for `lang`, falling back to English and then to the key.
+/// Kept for dynamic (non-`'static`) keys; hot UI paths use [`t_static`].
+#[allow(dead_code)]
 pub fn t(lang: Lang, key: &str) -> String {
     let lang = if lang == Lang::Auto {
         detect_system_lang()
@@ -233,6 +235,25 @@ pub fn t(lang: Lang, key: &str) -> String {
         return s.clone();
     }
     key.to_string()
+}
+
+/// Borrowed translation for hot UI paths: zero-alloc when the key exists
+/// (all app call sites use `'static` literals). Falls back to English,
+/// then to the key itself — never allocates.
+pub fn t_static(lang: Lang, key: &'static str) -> &'static str {
+    let lang = if lang == Lang::Auto {
+        detect_system_lang()
+    } else {
+        lang
+    };
+    let tables = tables();
+    if let Some(s) = tables.get(lang.file_key()).and_then(|table| table.get(key)) {
+        return s.as_str();
+    }
+    if let Some(s) = tables.get("en").and_then(|table| table.get(key)) {
+        return s.as_str();
+    }
+    key
 }
 
 #[cfg(test)]
@@ -275,6 +296,22 @@ mod tests {
     #[test]
     fn fallback_returns_key() {
         assert_eq!(t(Lang::English, "no-such-key-xyz"), "no-such-key-xyz");
+    }
+
+    #[test]
+    fn static_borrow_matches_owned_and_never_allocs_on_miss() {
+        // Same visible strings as the owned lookup.
+        assert_eq!(t_static(Lang::Russian, "File"), "Файл");
+        assert_eq!(t_static(Lang::English, "File"), "File");
+        for lang in Lang::all() {
+            for key in ["File", "Play", "Volume level", "Error", "Playlist"] {
+                assert_eq!(t_static(*lang, key), t(*lang, key));
+            }
+        }
+        // Miss returns the key itself, no allocation (pointer-identical).
+        let key: &'static str = "no-such-key-xyz-static";
+        assert!(std::ptr::eq(t_static(Lang::English, key), key));
+        assert!(std::ptr::eq(t_static(Lang::Russian, key), key));
     }
 
     #[test]

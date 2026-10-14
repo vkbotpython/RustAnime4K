@@ -35,7 +35,7 @@ impl Anime4KPlayerApp {
             .default_size([540.0, 420.0])
             .show(ctx, |ui| {
                 card(ui, |ui| {
-                    para(ui, &prompt);
+                    para(ui, prompt);
                     ui.monospace("volume=50");
                     hint(ui, "name=value");
                 });
@@ -90,8 +90,8 @@ impl Anime4KPlayerApp {
             self.flush_config();
         }
         match applied_ok {
-            Some(true) => self.set_status(success),
-            Some(false) => self.set_status(err),
+            Some(true) => self.set_status(success.to_owned()),
+            Some(false) => self.set_status(err.to_owned()),
             None => {}
         }
         self.show_launch_params = open;

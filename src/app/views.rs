@@ -614,31 +614,39 @@ impl Anime4KPlayerApp {
         };
         ui.group(|ui| {
             ui.label(title);
-            let tracks: Vec<_> = self
-                .snap
-                .tracks
-                .iter()
-                .filter(|t| t.kind == kind)
-                .cloned()
-                .collect();
-            if tracks.is_empty() {
+            let is_empty = match kind {
+                TrackKind::Audio => self.snap.audio_rows.is_empty(),
+                TrackKind::Sub => self.snap.sub_rows.is_empty(),
+            };
+            if is_empty {
                 ui.label(no_tracks);
             } else {
+                let mut disable_hit = false;
                 if ui.button(disable).clicked() {
+                    disable_hit = true;
+                }
+                let mut hit: Option<i64> = None;
+                {
+                    let rows = match kind {
+                        TrackKind::Audio => &self.snap.audio_rows,
+                        TrackKind::Sub => &self.snap.sub_rows,
+                    };
+                    for (id, label) in rows.iter() {
+                        if ui.button(label.as_str()).clicked() {
+                            hit = Some(*id);
+                        }
+                    }
+                }
+                if disable_hit {
                     match kind {
                         TrackKind::Audio => self.mpv.set_audio_track(0),
                         TrackKind::Sub => self.mpv.set_sub_track(0),
                     }
                 }
-                for track in tracks {
-                    if ui
-                        .button(format!("{}) {}", track.id, track.display()))
-                        .clicked()
-                    {
-                        match kind {
-                            TrackKind::Audio => self.mpv.set_audio_track(track.id),
-                            TrackKind::Sub => self.mpv.set_sub_track(track.id),
-                        }
+                if let Some(id) = hit {
+                    match kind {
+                        TrackKind::Audio => self.mpv.set_audio_track(id),
+                        TrackKind::Sub => self.mpv.set_sub_track(id),
                     }
                 }
             }
@@ -670,6 +678,9 @@ impl Anime4KPlayerApp {
                         TrackKind::Audio => self.mpv.add_audio_file(&path),
                         TrackKind::Sub => self.mpv.add_sub_file(&path),
                     }
+                    // External file: force a track-list refetch on the next
+                    // tick instead of waiting for a count change.
+                    self.tracks_count_cache = None;
                     match kind {
                         TrackKind::Audio => self.add_audio_path.clear(),
                         TrackKind::Sub => self.add_sub_path.clear(),

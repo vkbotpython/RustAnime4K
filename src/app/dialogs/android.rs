@@ -42,10 +42,10 @@ impl Anime4KPlayerApp {
             .default_size([540.0, 500.0])
             .show(ctx, |ui| {
                 card(ui, |ui| {
-                    para(ui, &intro);
+                    para(ui, intro);
                 });
                 card(ui, |ui| {
-                    field_title(ui, &path_label);
+                    field_title(ui, path_label);
                     text_field(
                         ui,
                         &mut self.android_path,
@@ -53,7 +53,7 @@ impl Anime4KPlayerApp {
                     );
                 });
                 card(ui, |ui| {
-                    field_title(ui, &preset_label);
+                    field_title(ui, preset_label);
                     egui::ComboBox::from_id_salt("android-preset")
                         .selected_text(&combos[self.android_index].0)
                         .show_ui(ui, |ui| {

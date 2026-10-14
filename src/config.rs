@@ -67,8 +67,12 @@ impl ConfigManager {
             fs::create_dir_all(parent)
                 .with_context(|| format!("cannot create {}", parent.display()))?;
         }
+        // Atomic write: a crash/power loss mid-write must not leave a torn
+        // `config.json`. Temp file + rename in the same directory.
         let text = serde_json::to_string_pretty(&self.values)?;
-        fs::write(&self.path, text)?;
+        let tmp = self.path.with_extension("json.tmp");
+        fs::write(&tmp, text)?;
+        fs::rename(&tmp, &self.path)?;
         Ok(())
     }
 
@@ -78,6 +82,36 @@ impl ConfigManager {
 
     pub fn set(&mut self, key: &str, value: Value) {
         self.values.insert(key.to_string(), value);
+    }
+
+    /// Inserts `key/value` into the object stored under `object_key`
+    /// without cloning the whole table (`write_file_preset` used to clone
+    /// every stored file preset on each preset choice — O(N) per apply).
+    /// Caps the object at `max_entries`, evicting an arbitrary entry when
+    /// full so per-file tables (`filePresets`) stay bounded.
+    pub fn set_nested_capped(
+        &mut self,
+        object_key: &str,
+        key: &str,
+        value: Value,
+        max_entries: usize,
+    ) {
+        let entry = self
+            .values
+            .entry(object_key.to_string())
+            .or_insert_with(|| Value::Object(Default::default()));
+        let Value::Object(map) = entry else {
+            *entry = Value::Object([(key.to_string(), value)].into_iter().collect());
+            return;
+        };
+        map.insert(key.to_string(), value);
+        while map.len() > max_entries {
+            if let Some(first) = map.keys().next().cloned() {
+                map.remove(&first);
+            } else {
+                break;
+            }
+        }
     }
 
     /// Removes a stored key (used when stored state is corrupt).
@@ -129,5 +163,47 @@ mod tests {
     fn missing_file_is_empty() {
         let cfg = ConfigManager::with_path(tmp_path("does-not-exist.json"));
         assert!(cfg.get("x").is_none());
+    }
+
+    #[test]
+    fn save_is_atomic_and_readable() {
+        let path = tmp_path("atomic.json");
+        let _ = fs::remove_file(&path);
+        let _ = fs::remove_file(path.with_extension("json.tmp"));
+        let mut cfg = ConfigManager::with_path(path.clone());
+        cfg.set("volume", json!(80));
+        cfg.save().unwrap();
+        // No temp leftover, main file parses.
+        assert!(!path.with_extension("json.tmp").exists());
+        let text = fs::read_to_string(&path).unwrap();
+        let map: HashMap<String, Value> = serde_json::from_str(&text).unwrap();
+        assert_eq!(map.get("volume"), Some(&json!(80)));
+        let _ = fs::remove_file(&path);
+    }
+
+    #[test]
+    fn nested_capped_inserts_without_cloning_and_bounds_growth() {
+        let path = tmp_path("nested.json");
+        let _ = fs::remove_file(&path);
+        let mut cfg = ConfigManager::with_path(path.clone());
+        cfg.set_nested_capped("filePresets", "a.mkv", json!({"disabled": true}), 3);
+        cfg.set_nested_capped("filePresets", "b.mkv", json!({"disabled": true}), 3);
+        assert_eq!(
+            cfg.get("filePresets").unwrap().as_object().unwrap().len(),
+            2
+        );
+        // Existing entries survive new inserts (no whole-table replace).
+        cfg.set_nested_capped("filePresets", "c.mkv", json!({"disabled": true}), 3);
+        cfg.set_nested_capped("filePresets", "d.mkv", json!({"disabled": true}), 3);
+        let map = cfg.get("filePresets").unwrap().as_object().unwrap();
+        assert_eq!(map.len(), 3);
+        assert!(map.contains_key("d.mkv"));
+        // Overwriting a non-object value replaces it with an object.
+        cfg.set("filePresets", json!("garbage"));
+        cfg.set_nested_capped("filePresets", "e.mkv", json!({"disabled": true}), 3);
+        let map = cfg.get("filePresets").unwrap().as_object().unwrap();
+        assert_eq!(map.len(), 1);
+        assert!(map.contains_key("e.mkv"));
+        let _ = fs::remove_file(&path);
     }
 }

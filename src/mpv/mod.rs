@@ -100,6 +100,11 @@ pub trait MpvBackend: Send + Sync {
     fn fps(&self) -> Option<f64>;
     fn frame_drop_count(&self) -> Option<i64>;
     fn tracks(&self) -> Vec<Track>;
+    /// Cheap `track-list/count` probe. `tracks()` fans out into dozens of
+    /// property reads, so the UI refetches only when the count changed.
+    fn track_count(&self) -> i64 {
+        0
+    }
     fn set_audio_track(&self, id: i64);
     fn set_sub_track(&self, id: i64);
     fn add_sub_file(&self, path: &str);

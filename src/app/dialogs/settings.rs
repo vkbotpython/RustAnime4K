@@ -100,7 +100,7 @@ impl Anime4KPlayerApp {
                             }
                         });
                     ui.add_space(2.0);
-                    hint(ui, &language_label);
+                    hint(ui, language_label);
                     ui.add_space(4.0);
                     ui.checkbox(&mut self.settings_open_last, open_last_label);
                     ui.checkbox(&mut self.settings_pos_last, pos_last_label);
@@ -174,17 +174,17 @@ impl Anime4KPlayerApp {
                                     ui.selectable_value(
                                         &mut self.settings_scheme,
                                         ColorScheme::System,
-                                        scheme_system.as_str(),
+                                        scheme_system,
                                     );
                                     ui.selectable_value(
                                         &mut self.settings_scheme,
                                         ColorScheme::Dark,
-                                        scheme_dark.as_str(),
+                                        scheme_dark,
                                     );
                                     ui.selectable_value(
                                         &mut self.settings_scheme,
                                         ColorScheme::Light,
-                                        scheme_light.as_str(),
+                                        scheme_light,
                                     );
                                 });
                             ui.end_row();

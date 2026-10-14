@@ -65,7 +65,7 @@ impl Anime4KPlayerApp {
             .min_width(480.0)
             .show(ctx, |ui| {
                 card(ui, |ui| {
-                    field_title(ui, &prompt);
+                    field_title(ui, prompt);
                     text_field(
                         ui,
                         &mut self.screenshot_dir_text,
@@ -175,7 +175,7 @@ impl Anime4KPlayerApp {
                 });
             });
         if failed {
-            self.set_status(err);
+            self.set_status(err.to_owned());
         }
         self.show_screenshot = open && !done;
     }

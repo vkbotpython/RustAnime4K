@@ -187,6 +187,9 @@ impl MpvBackend for LibMpv {
     fn frame_drop_count(&self) -> Option<i64> {
         self.get_opt("frame-drop-count")
     }
+    fn track_count(&self) -> i64 {
+        self.get_opt("track-list/count").unwrap_or(0)
+    }
     fn tracks(&self) -> Vec<Track> {
         // `track-list` is a node property; read it back through the indexed
         // scalar aliases (`track-list/0/type`, ...) instead.

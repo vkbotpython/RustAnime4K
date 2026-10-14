@@ -35,7 +35,7 @@ impl Anime4KPlayerApp {
             .min_width(500.0)
             .show(ctx, |ui| {
                 card(ui, |ui| {
-                    field_title(ui, &prompt);
+                    field_title(ui, prompt);
                     text_field(ui, &mut self.url_text, "https://…");
                     ui.add_space(4.0);
                     ui.horizontal_wrapped(|ui| {
@@ -134,7 +134,7 @@ impl Anime4KPlayerApp {
             .min_width(500.0)
             .show(ctx, |ui| {
                 card(ui, |ui| {
-                    field_title(ui, &prompt);
+                    field_title(ui, prompt);
                     text_field(
                         ui,
                         &mut self.folder_text,

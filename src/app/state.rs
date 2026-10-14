@@ -123,6 +123,20 @@ pub struct Anime4KPlayerApp {
     pub(crate) snap: MpvSnapshot,
     /// Last snapshot poll time; polling is time-gated (see `poll_mpv`).
     pub(crate) last_poll: Option<Instant>,
+    /// Last slow-tier poll time (`volume/drops/cache`, see `poll_mpv`).
+    pub(crate) last_slow_poll: Option<Instant>,
+    /// File key the static snapshot fields were fetched for. `None` forces
+    /// a refetch (file changed or metadata not ready yet).
+    pub(crate) snap_static_key: Option<String>,
+    /// `track-list/count` at the last `tracks()` fetch; a change forces a
+    /// refetch while menus are open instead of polling every tick.
+    pub(crate) tracks_count_cache: Option<i64>,
+    /// File key the cached track list belongs to.
+    pub(crate) tracks_file_key: Option<String>,
+    /// Last debounced config flush (see `flush_config_debounced`).
+    pub(crate) last_config_save: Option<Instant>,
+    /// Config changed since the last debounced flush and still needs a write.
+    pub(crate) config_dirty: bool,
     /// Preset waiting to be applied once playback metadata is in
     /// (see `flush_pending_preset`).
     pub(crate) pending_preset: Option<PresetChoice>,
@@ -211,7 +225,22 @@ pub(crate) struct MpvSnapshot {
     /// Cached only while an audio/sub menu is open (`tracks()` fans out
     /// into hundreds of property reads — never per frame).
     pub(crate) tracks: Vec<Track>,
+    /// Prebuilt menu rows `(id, label)` per kind, refreshed together with
+    /// `tracks` so `track_menu` iterates `&str` without per-frame `format!`.
+    pub(crate) audio_rows: Vec<(i64, String)>,
+    pub(crate) sub_rows: Vec<(i64, String)>,
 }
+
+/// Fast snapshot tier (position/state), see `poll_mpv`.
+pub(crate) const FAST_POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// Slow snapshot tier (`volume/drops/cache`), see `poll_mpv`.
+pub(crate) const SLOW_POLL_INTERVAL: Duration = Duration::from_millis(1500);
+/// Minimum interval between debounced config writes, see
+/// `flush_config_debounced`.
+pub(crate) const CONFIG_FLUSH_DEBOUNCE: Duration = Duration::from_millis(500);
+/// Upper bound for per-file presets (`filePresets` grows unbounded
+/// otherwise — one key per opened file).
+pub(crate) const MAX_FILE_PRESETS: usize = 500;
 
 /// Per-file Anime4K choice stored under config `filePresets`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -344,6 +373,12 @@ impl Anime4KPlayerApp {
                 ..Default::default()
             },
             last_poll: None,
+            last_slow_poll: None,
+            snap_static_key: None,
+            tracks_count_cache: None,
+            tracks_file_key: None,
+            last_config_save: None,
+            config_dirty: false,
             pending_preset: None,
             ui_ms_ema: 0.0,
             video_ms_ema: 0.0,
@@ -359,8 +394,8 @@ impl Anime4KPlayerApp {
         app
     }
 
-    pub(crate) fn t(&self, key: &str) -> String {
-        i18n::t(self.lang, key)
+    pub(crate) fn t(&self, key: &'static str) -> &'static str {
+        i18n::t_static(self.lang, key)
     }
 
     /// Transient video-corner message: shown for `STATUS_TTL`, then
@@ -386,9 +421,48 @@ impl Anime4KPlayerApp {
     /// Flushes in-memory config to disk right away (explicit user action —
     /// a crash/exit must not lose it). High-frequency updates (volume drag,
     /// playback position) still rely on the exit save instead.
-    pub(crate) fn flush_config(&self) {
+    pub(crate) fn flush_config(&mut self) {
+        self.last_config_save = Some(Instant::now());
+        self.config_dirty = false;
         if let Err(err) = self.config.save() {
             eprintln!("cannot save config: {err:#}");
+        }
+    }
+
+    /// Debounced config write for high-frequency updates (volume
+    /// hotkeys/autorepeat): writes at most every `CONFIG_FLUSH_DEBOUNCE`
+    /// and remembers the remainder via `config_dirty` instead of issuing
+    /// dozens of writes per second. The pending write lands on the next
+    /// due call or at the latest on exit (`save_on_exit` always saves).
+    pub(crate) fn flush_config_debounced(&mut self) {
+        use super::state::CONFIG_FLUSH_DEBOUNCE;
+
+        let now = Instant::now();
+        if self
+            .last_config_save
+            .is_some_and(|last| now.duration_since(last) < CONFIG_FLUSH_DEBOUNCE)
+        {
+            self.config_dirty = true;
+            return;
+        }
+        self.flush_config();
+    }
+
+    /// Writes a debounced-pending config update once it is due. Called
+    /// every frame from `ui()`; a no-op unless `flush_config_debounced`
+    /// deferred a write earlier.
+    pub(crate) fn flush_config_if_due(&mut self) {
+        use super::state::CONFIG_FLUSH_DEBOUNCE;
+
+        if !self.config_dirty {
+            return;
+        }
+        let now = Instant::now();
+        if self
+            .last_config_save
+            .is_none_or(|last| now.duration_since(last) >= CONFIG_FLUSH_DEBOUNCE)
+        {
+            self.flush_config();
         }
     }
 

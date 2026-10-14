@@ -145,13 +145,13 @@ impl Anime4KPlayerApp {
         if pressed(Key::ArrowUp, Modifiers::NONE) {
             self.player.volume_up(&*self.mpv);
             self.config.set("volume", json!(self.player.volume));
-            self.flush_config();
+            self.flush_config_debounced();
             return;
         }
         if pressed(Key::ArrowDown, Modifiers::NONE) {
             self.player.volume_down(&*self.mpv);
             self.config.set("volume", json!(self.player.volume));
-            self.flush_config();
+            self.flush_config_debounced();
             return;
         }
         if pressed(Key::Plus, Modifiers::NONE)
