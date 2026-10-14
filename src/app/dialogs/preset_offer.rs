@@ -48,7 +48,7 @@ impl Anime4KPlayerApp {
                 self.preset_offer_mode = "A".to_string();
             }
             if !anime4k::QUALITIES.contains(&self.preset_offer_quality.as_str()) {
-                self.preset_offer_quality = "M".to_string();
+                self.preset_offer_quality = "HQ".to_string();
             }
         }
 

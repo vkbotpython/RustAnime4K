@@ -296,7 +296,7 @@ impl Anime4KPlayerApp {
                     .as_deref()
                     .unwrap_or("System"),
             ),
-            preset_offer_quality: "M".to_string(),
+            preset_offer_quality: "HQ".to_string(),
             preset_offer_mode: "A".to_string(),
             preset_offer_dont_ask: false,
             config,

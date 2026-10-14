@@ -59,10 +59,15 @@ pub(crate) fn text_field(ui: &mut egui::Ui, text: &mut String, hint_text: &str) 
 /// Нижняя панель кнопок: разделитель + выравнивание вправо.
 /// Внимание: в `right_to_left` первая добавленная кнопка оказывается справа,
 /// поэтому основное действие (Сохранить/Выбрать/Применить) идёт первым.
+/// `horizontal` вокруг обязателен: голый `with_layout(right_to_left)`
+/// забирает `available_size()` (весь остаток окна по высоте) и даёт
+/// огромную пустую полосу над кнопками.
 pub(crate) fn bottom_bar(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     ui.separator();
     ui.add_space(2.0);
-    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add);
+    ui.horizontal(|ui| {
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), add);
+    });
 }
 
 /// Цветной бейдж (режимы Anime4K, стек технологий).
