@@ -74,7 +74,7 @@ impl Anime4KPlayerApp {
                     egui::Grid::new("offer-preset")
                         .num_columns(2)
                         .spacing([12.0, 6.0])
-                        .striped(true)
+                        .striped(false)
                         .show(ui, |ui| {
                             ui.label(quality_label);
                             egui::ComboBox::from_id_salt("offer-quality")
