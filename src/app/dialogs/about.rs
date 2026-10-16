@@ -90,7 +90,7 @@ impl Anime4KPlayerApp {
                 egui::Grid::new("about_info")
                     .num_columns(2)
                     .spacing([12.0, 4.0])
-                    .striped(true)
+                    .striped(false)
                     .show(ui, |ui| {
                         ui.label(
                             egui::RichText::new(if russian { "Движок" } else { "Engine" })

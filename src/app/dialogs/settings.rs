@@ -166,10 +166,11 @@ impl Anime4KPlayerApp {
                     egui::Grid::new("settings_appearance")
                         .num_columns(2)
                         .spacing([12.0, 6.0])
-                        .striped(true)
+                        .striped(false)
                         .show(ui, |ui| {
                             ui.label(palette_label);
                             egui::ComboBox::from_id_salt("palette")
+                                .width(180.0)
                                 .selected_text(palette_selected)
                                 .show_ui(ui, |ui| {
                                     for &name in Palette::all_names() {
@@ -188,6 +189,7 @@ impl Anime4KPlayerApp {
                             ui.end_row();
                             ui.label(scheme_label);
                             egui::ComboBox::from_id_salt("scheme")
+                                .width(180.0)
                                 .selected_text(scheme_selected)
                                 .show_ui(ui, |ui| {
                                     ui.selectable_value(
@@ -208,23 +210,25 @@ impl Anime4KPlayerApp {
                                 });
                             ui.end_row();
                             ui.label(style_label);
-                            // Three fixed options: inline selectables instead
-                            // of a ComboBox. A popup is capped by
-                            // `combo_height` and the space below the widget,
-                            // so in the spacious style the third row ended up
-                            // cut off with a scrollbar.
-                            ui.horizontal(|ui| {
+                            // Сегментированный переключатель: у `selectable_value`
+                            // нет постоянной рамки, поэтому выбранный пункт
+                            // терялся на фоне карточки. Кнопки с `selected()`
+                            // всегда рисуют рамку, а выбранная подсвечивается
+                            // цветом выделения темы.
+                            ui.horizontal_wrapped(|ui| {
                                 for &name in crate::theme::style::all_names() {
-                                    let style_label: &str = match name {
+                                    let option_label: &str = match name {
                                         crate::theme::style::COMPACT => style_compact,
                                         crate::theme::style::SPACIOUS => style_spacious,
                                         _ => style_default,
                                     };
-                                    ui.selectable_value(
-                                        &mut self.settings_style,
-                                        name.to_string(),
-                                        style_label,
-                                    );
+                                    let selected = self.settings_style == name;
+                                    if ui
+                                        .add(egui::Button::new(option_label).selected(selected))
+                                        .clicked()
+                                    {
+                                        self.settings_style = name.to_string();
+                                    }
                                 }
                             });
                             ui.end_row();
