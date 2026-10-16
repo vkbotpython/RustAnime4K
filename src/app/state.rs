@@ -300,6 +300,9 @@ impl Anime4KPlayerApp {
         // Enables PNG decoding for `egui::Image::from_bytes` (About dialog).
         // Without this, images render as a ⚠ placeholder.
         egui_extras::install_image_loaders(&cc.egui_ctx);
+        // Proportional fallback so arrows/shapes (→ ▶ ↑ ↓) and media icons
+        // render instead of tofu boxes (see `crate::fonts`).
+        crate::fonts::install_ui_fonts(&cc.egui_ctx);
         let config = ConfigManager::new("config.json");
         let lang = i18n::resolve(get_str(&config, "language").as_deref());
         let volume_plus = get_bool(&config, "volumePlus", false);

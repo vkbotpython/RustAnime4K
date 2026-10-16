@@ -6,6 +6,7 @@
 mod anime4k;
 mod app;
 mod config;
+mod fonts;
 mod formats;
 mod i18n;
 mod icon;
