@@ -61,6 +61,13 @@ function Find-MpvDll([string]$hint) {
   $candidates += (Join-Path $RepoRoot 'target\debug\libmpv-2.dll')
   # Прошлая сборка/пакет (например, скачанный из CI Actions).
   $candidates += (Join-Path $RepoRoot 'dist\anime4k-player\libmpv-2.dll')
+  # Стандартные установки mpv (mpv.net и др.).
+  foreach ($pf in @($env:ProgramFiles, ${env:ProgramFiles(x86)})) {
+    if (($pf -ne $null) -and ($pf -ne "")) {
+      $candidates += (Join-Path $pf 'mpv.net\libmpv-2.dll')
+      $candidates += (Join-Path $pf 'mpv\libmpv-2.dll')
+    }
+  }
   # Установленный mpv-плеер и прочие каталоги из PATH.
   foreach ($dir in ($env:PATH -split ';')) {
     if (($dir -ne $null) -and ($dir -ne "")) {
@@ -85,6 +92,24 @@ function Find-ToolDir {
     if ($found) { return $found.DirectoryName }
   }
   return $null
+}
+
+function New-MpvLibFromDll([string]$dllFullPath) {
+  # Генерирует mpvlib-local/mpv.lib из готовой libmpv-2.dll
+  # (нужны dumpbin.exe/lib.exe из VS BuildTools, без скачивания и 7z).
+  $tool = Find-ToolDir
+  if (-not $tool) { throw 'dumpbin.exe (VS BuildTools) not found' }
+  $names = & "$tool/dumpbin.exe" /exports $dllFullPath |
+    Select-String '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)' |
+    ForEach-Object { $_.Matches.Groups[1].Value }
+  if (-not $names) { throw 'no exports parsed from libmpv-2.dll' }
+  $libDir = Join-Path $RepoRoot 'mpvlib-local'
+  New-Item -ItemType Directory -Force $libDir | Out-Null
+  $defFile = Join-Path $libDir 'mpv.def'
+  @('LIBRARY libmpv-2', 'EXPORTS') + $names | Out-File $defFile -Encoding ascii
+  $libOut = Join-Path $libDir 'mpv.lib'
+  & "$tool/lib.exe" "/def:$defFile" "/out:$libOut" '/machine:x64'
+  if ($LASTEXITCODE -ne 0) { throw 'lib.exe failed' }
 }
 
 function Install-MpvDev {
@@ -123,18 +148,7 @@ function Install-MpvDev {
   7z x $sevenZ "-o$outDir" 'libmpv-2.dll' -y | Out-Null
   $dll = Get-ChildItem $outDir -Recurse -Filter libmpv-2.dll | Select-Object -First 1
   if (-not $dll) { throw 'libmpv-2.dll not found in archive' }
-  $tool = Find-ToolDir
-  if (-not $tool) { throw 'dumpbin.exe (VS BuildTools) not found' }
-  $names = & "$tool/dumpbin.exe" /exports $dll.FullName |
-    Select-String '^\s+\d+\s+[0-9A-F]+\s+[0-9A-F]+\s+(\S+)' |
-    ForEach-Object { $_.Matches.Groups[1].Value }
-  if (-not $names) { throw 'no exports parsed from libmpv-2.dll' }
-  $libDir = Join-Path $RepoRoot 'mpvlib-local'
-  New-Item -ItemType Directory -Force $libDir | Out-Null
-  $defFile = Join-Path $dlDir 'mpv.def'
-  @('LIBRARY libmpv-2', 'EXPORTS') + $names | Out-File $defFile -Encoding ascii
-  & "$tool/lib.exe" "/def:$defFile" "/out:$libDir/mpv.lib" '/machine:x64'
-  if ($LASTEXITCODE -ne 0) { throw 'lib.exe failed' }
+  New-MpvLibFromDll $dll.FullName
   return $dll.FullName
 }
 
@@ -149,8 +163,12 @@ $MpvLib = Join-Path $LibDir 'mpv.lib'
 $DllPath = $null
 
 if ($Video) {
+  if (-not $DllPath) { $DllPath = Find-MpvDll $MpvDll }
   if (-not (Test-Path $MpvLib)) {
-    if ($DownloadMpv) {
+    if ($DllPath) {
+      Step "Генерация mpv.lib из $DllPath"
+      New-MpvLibFromDll $DllPath
+    } elseif ($DownloadMpv) {
       $DllPath = Install-MpvDev
     } else {
       throw 'mpvlib-local/mpv.lib не найден. Собери его через .\build.ps1 -DownloadMpv (нужны VS BuildTools + 7z) или собери без video: .\build.ps1 -NoVideo'
@@ -159,7 +177,7 @@ if ($Video) {
   if (-not $DllPath) { $DllPath = Find-MpvDll $MpvDll }
   if (-not $DllPath -and $DownloadMpv) { $DllPath = Install-MpvDev }
   if (-not $DllPath) {
-    throw 'libmpv-2.dll не найдена (проверены корень репо, mpvlib-local, target/release, dist и PATH). Скопируй её из прошлой сборки в корень репо, укажи -MpvDll <путь> или используй -DownloadMpv'
+    throw 'libmpv-2.dll не найдена (проверены корень репо, mpvlib-local, target/release, dist, mpv.net и PATH). Скопируй её из прошлой сборки в корень репо, укажи -MpvDll <путь> или используй -DownloadMpv'
   }
   Write-Host "mpv.lib : $MpvLib"
   Write-Host "mpv dll : $DllPath"
