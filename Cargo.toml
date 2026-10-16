@@ -1,6 +1,6 @@
 [package]
 name = "anime4k-player"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2024"
 authors = ["avencores"]
 description = "Video player with Anime4K image upscaling"

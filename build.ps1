@@ -283,7 +283,7 @@ if ($Installer) {
   if (-not (Test-Path $ISCC)) {
     throw 'ISCC.exe (Inno Setup 6) не найден. Установи: winget install -e --id JRSoftware.InnoSetup'
   }
-  $Ver = '1.0.0'
+  $Ver = '1.0.1'
   $m = [regex]::Match(
     (Get-Content (Join-Path $RepoRoot 'Cargo.toml') -Raw),
     '(?m)^version\s*=\s*"([^"]+)"')
