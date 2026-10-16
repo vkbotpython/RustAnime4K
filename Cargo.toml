@@ -5,6 +5,7 @@ edition = "2024"
 authors = ["avencores"]
 description = "Video player with Anime4K image upscaling"
 license = "GPL-3.0-or-later"
+repository = "https://gitlab.com/avencores/RustAnime4KPlayer"
 
 [[bin]]
 name = "anime4k-player"

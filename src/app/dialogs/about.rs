@@ -140,8 +140,8 @@ impl Anime4KPlayerApp {
                         ui.hyperlink("https://dzen.ru/avencores");
                     });
                     ui.horizontal_wrapped(|ui| {
-                        ui.label("GitHub:");
-                        ui.hyperlink("https://github.com/vkbotpython/RustAnime4K");
+                        ui.label("GitLab:");
+                        ui.hyperlink("https://gitlab.com/avencores/RustAnime4KPlayer");
                     });
                 });
                 // --- донат ---

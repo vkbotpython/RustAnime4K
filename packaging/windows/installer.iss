@@ -11,7 +11,7 @@
 #define MyAppVersion "1.0.0"
 #endif
 #define MyAppPublisher "avencores"
-#define MyAppURL "https://github.com/vkbotpython/RustAnime4K"
+#define MyAppURL "https://gitlab.com/avencores/RustAnime4KPlayer"
 #define MyAppExeName "anime4k-player.exe"
 #define MyAppAssocName MyAppName + " File"
 
