@@ -85,10 +85,16 @@ impl Anime4KPlayerApp {
             .open(&mut open)
             .resizable(false)
             .collapsible(false)
-            .min_width(420.0)
+            .min_width(520.0)
+            .max_width(520.0)
             .show(ctx, |ui| {
+                // Фиксированная ширина контента: все три карточки одинаковые,
+                // константа (не available_width) — иначе окно и контент
+                // растягивают друг друга бесконечно вбок.
+                const CONTENT_W: f32 = 476.0;
                 // --- язык и запуск ---
                 card(ui, |ui| {
+                    ui.set_min_width(CONTENT_W);
                     field_title(
                         ui,
                         if russian {
@@ -121,6 +127,7 @@ impl Anime4KPlayerApp {
                 });
                 // --- воспроизведение ---
                 card(ui, |ui| {
+                    ui.set_min_width(CONTENT_W);
                     field_title(
                         ui,
                         if russian {
@@ -155,6 +162,7 @@ impl Anime4KPlayerApp {
                 });
                 // --- оформление ---
                 card(ui, |ui| {
+                    ui.set_min_width(CONTENT_W);
                     field_title(
                         ui,
                         if russian {
@@ -210,12 +218,12 @@ impl Anime4KPlayerApp {
                                 });
                             ui.end_row();
                             ui.label(style_label);
-                            // Сегментированный переключатель: у `selectable_value`
-                            // нет постоянной рамки, поэтому выбранный пункт
-                            // терялся на фоне карточки. Кнопки с `selected()`
-                            // всегда рисуют рамку, а выбранная подсвечивается
-                            // цветом выделения темы.
-                            ui.horizontal_wrapped(|ui| {
+                            // Сегментированный переключатель в одну строку:
+                            // ширины окна (520) хватает на все три кнопки,
+                            // поэтому `horizontal` без переноса — третья
+                            // кнопка больше не съезжает вниз.
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 6.0;
                                 for &name in crate::theme::style::all_names() {
                                     let option_label: &str = match name {
                                         crate::theme::style::COMPACT => style_compact,
