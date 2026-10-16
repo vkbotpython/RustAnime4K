@@ -22,24 +22,24 @@ default = []
 video = ["dep:libmpv2"]
 
 [dependencies]
-eframe = { version = "0.35", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
-egui = "0.35"
-egui_extras = { version = "0.35", default-features = false, features = ["image"] }
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
-dirs = "6"
-anyhow = "1"
-rfd = "0.17"
-sys-locale = "0.3"
-arboard = "2"
-dark-light = "1"
-libmpv2 = { version = "6", optional = true }
+eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "glow", "wayland", "x11"] }
+egui = "0.37.0"
+egui_extras = { version = "0.37.0", default-features = false, features = ["image"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.154"
+dirs = "7.0.0"
+anyhow = "1.0.104"
+rfd = "0.17.2"
+sys-locale = "0.3.2"
+arboard = "3.7.0"
+dark-light = "3.0.0"
+libmpv2 = { version = "6.0.0", optional = true }
 
 [dev-dependencies]
-tempfile = "3"
+tempfile = "3.27.0"
 
 [build-dependencies]
-winres = "0.1"
+winres = "0.1.12"
 
 [profile.release]
 opt-level = 3

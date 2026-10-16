@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 <#
 .SYNOPSIS
   Локальная сборка Anime4K Player (Windows): проверки + release + dist-пакет.

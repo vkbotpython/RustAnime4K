@@ -35,7 +35,7 @@ impl Anime4KPlayerApp {
     pub(crate) fn menu_overlay(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let width = ctx.viewport_rect().width().max(0.0);
-        egui::Area::new(egui::Id::new("menu_overlay"))
+        egui::Area::new(egui::Id::unique("menu_overlay"))
             .anchor(egui::Align2::CENTER_TOP, egui::vec2(0.0, 0.0))
             .order(egui::Order::Foreground)
             .movable(false)
@@ -488,7 +488,7 @@ impl Anime4KPlayerApp {
     pub(crate) fn controls_overlay(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let width = ctx.viewport_rect().width().max(0.0);
-        egui::Area::new(egui::Id::new("controls_overlay"))
+        egui::Area::new(egui::Id::unique("controls_overlay"))
             .anchor(egui::Align2::CENTER_BOTTOM, egui::vec2(0.0, 0.0))
             .order(egui::Order::Foreground)
             .movable(false)
@@ -759,7 +759,7 @@ impl Anime4KPlayerApp {
         let vp = ctx.viewport_rect();
         let width = OVERLAY_PLAYLIST_WIDTH.min(vp.width()).max(0.0);
         let height = vp.height().max(0.0);
-        egui::Area::new(egui::Id::new("playlist_overlay"))
+        egui::Area::new(egui::Id::unique("playlist_overlay"))
             .anchor(egui::Align2::RIGHT_CENTER, egui::vec2(0.0, 0.0))
             .order(egui::Order::Foreground)
             .movable(false)
