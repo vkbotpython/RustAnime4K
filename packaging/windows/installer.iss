@@ -8,7 +8,7 @@
 
 #define MyAppName "Anime4K Player"
 #ifndef MyAppVersion
-#define MyAppVersion "1.0.1"
+#define MyAppVersion "1.0.2"
 #endif
 #define MyAppPublisher "avencores"
 #define MyAppURL "https://gitlab.com/avencores/RustAnime4KPlayer"
