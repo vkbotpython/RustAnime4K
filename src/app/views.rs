@@ -20,8 +20,11 @@ impl Anime4KPlayerApp {
     /// прозрачный. Прозрачным делается только фон — кнопки и текст поверх
     /// остаются непрозрачными и читаемыми в любой теме.
     fn overlay_fill(ui: &egui::Ui) -> egui::Color32 {
-        let c = ui.visuals().window_fill;
-        egui::Color32::from_rgba_unmultiplied(c.r(), c.g(), c.b(), OVERLAY_ALPHA)
+        // `window_fill` хранится premultiplied (под Mica/Acrylic — ещё и
+        // полупрозрачным): каналы нужно размножить обратно, иначе подложка
+        // потемнеет.
+        let [r, g, b, _] = ui.visuals().window_fill.to_srgba_unmultiplied();
+        egui::Color32::from_rgba_unmultiplied(r, g, b, OVERLAY_ALPHA)
     }
 
     pub(crate) fn menu_bar(&mut self, ui: &mut egui::Ui) {

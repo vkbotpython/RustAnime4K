@@ -67,11 +67,13 @@ dependencies = [
  "egui",
  "egui_extras",
  "libmpv2",
+ "raw-window-handle",
  "rfd",
  "serde",
  "serde_json",
  "sys-locale",
  "tempfile",
+ "windows-sys 0.61.2",
  "winres",
 ]
 

@@ -51,6 +51,9 @@
 - 25 языков (автоопределение + ручной выбор), 5 палитр ×
   системная/светлая/тёмная схема, 3 стиля интерфейса, вставка из буфера обмена
   (кнопки Paste) во всех диалогах
+- Фон окна **Mica / Mica Alt / Acrylic** (Windows 11 22H2+): полупрозрачные
+  панели и диалоги, сквозь которые просвечивают обои рабочего стола
+  (Настройки → «Фон окна», по умолчанию выключено)
 - Восстановление сессии (последний файл/URL/папка + позиция ≥ 10 с, сохранённый
   пресет файла, геометрия окна, громкость, SVP/сдвиг звука/параметры запуска),
   параметры запуска, «О программе» с иконкой, чипами стека,
@@ -112,6 +115,7 @@ src/
     data.rs      режимы, шейдеры, конвейеры
     widgets.rs   карточки, бейджи, секции
   theme.rs     палитры + тема + стили egui
+  mica.rs      фон окна Mica/Acrylic (Windows 11, DWM)
 build.rs       иконка exe через winres (только Windows)
 build.ps1      локальная сборка Windows (проверки + release + dist + -Installer/-Zip)
 build.sh       локальная сборка Linux (проверки + release + dist + .deb/.rpm)
@@ -125,6 +129,7 @@ packaging/     windows/installer.iss (Inno Setup: лицензия, катало
 
 Зависимости сверх eframe/egui: `arboard` (кнопки Paste из буфера обмена),
 `dark-light` (системная тема), `egui_extras/image` (PNG в «О программе»),
+`raw-window-handle` (HWND окна для DWM), `windows-sys` (Mica/Acrylic-фон),
 `winres` (иконка exe, build).
 
 ## ⚙️ Конфиг (`config.json`)
@@ -133,7 +138,8 @@ packaging/     windows/installer.iss (Inno Setup: лицензия, катало
 `~/.config/Anime4K Player/config.json` (Linux).
 
 Рядом с остальными ключами (`volume`, `language`, `palette`, `style`,
-`colorScheme`, `soundOffset`, `SVP`, `volumePlus`, `onOpenLastFile`,
+`colorScheme`, `backdrop`, `soundOffset`, `SVP`, `volumePlus`,
+`onOpenLastFile`,
 `onPosLastFile`, `fixedControlPanel`, `opened`, `file`, `position`,
 `linksHistory`, `foldersHistory`, `launchParameters`, `screenshotDirectory`,
 `androidPath`, `windowX`, `windowY`, `windowW`, `windowH`, `windowMaximized`)

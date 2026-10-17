@@ -3,7 +3,7 @@
 use crate::app::helpers::{get_bool, get_str};
 use crate::app::state::Anime4KPlayerApp;
 use crate::i18n::{self, Lang};
-use crate::theme::{ColorScheme, Palette};
+use crate::theme::{Backdrop, ColorScheme, Palette};
 use serde_json::{Value, json};
 
 use super::ui_kit::{bottom_bar, card, field_title, hint};
@@ -39,6 +39,11 @@ impl Anime4KPlayerApp {
                 .as_deref()
                 .unwrap_or("System"),
         );
+        self.settings_backdrop = Backdrop::from_name(
+            get_str(&self.config, "backdrop")
+                .as_deref()
+                .unwrap_or("Off"),
+        );
         self.show_settings = true;
     }
 
@@ -58,6 +63,10 @@ impl Anime4KPlayerApp {
         let palette_label = self.t("Palette");
         let style_label = self.t("Theme style");
         let scheme_label = self.t("Color scheme");
+        // The backdrop row exists on Windows only (DWM materials); the
+        // label is unused elsewhere.
+        #[cfg(windows)]
+        let backdrop_label = self.t("Backdrop");
         let save_label = self.t("Save");
         let cancel_label = self.t("Cancel");
         let scheme_system = self.t("System");
@@ -217,6 +226,25 @@ impl Anime4KPlayerApp {
                                     );
                                 });
                             ui.end_row();
+                            // Mica/Acrylic are DWM window materials
+                            // (Windows 11): elsewhere the row is hidden.
+                            #[cfg(windows)]
+                            {
+                                ui.label(backdrop_label);
+                                egui::ComboBox::from_id_salt("backdrop")
+                                    .width(180.0)
+                                    .selected_text(self.settings_backdrop.name())
+                                    .show_ui(ui, |ui| {
+                                        for &name in Backdrop::all_names() {
+                                            ui.selectable_value(
+                                                &mut self.settings_backdrop,
+                                                Backdrop::from_name(name),
+                                                name,
+                                            );
+                                        }
+                                    });
+                                ui.end_row();
+                            }
                             ui.label(style_label);
                             // Сегментированный переключатель в одну строку:
                             // ширины окна (520) хватает на все три кнопки,
@@ -241,6 +269,17 @@ impl Anime4KPlayerApp {
                             });
                             ui.end_row();
                         });
+                    #[cfg(windows)]
+                    {
+                        hint(
+                            ui,
+                            if russian {
+                                "Полупрозрачный фон окна: «Mica», «Mica Alt», «Acrylic» (Windows 11 22H2+)."
+                            } else {
+                                "Translucent window: Mica, Mica Alt, Acrylic (Windows 11 22H2+)."
+                            },
+                        );
+                    }
                 });
                 bottom_bar(ui, |ui| {
                     if ui.button(save_label).clicked() {
@@ -281,6 +320,8 @@ impl Anime4KPlayerApp {
         self.config.set("style", json!(self.settings_style.clone()));
         self.config
             .set("colorScheme", json!(self.settings_scheme.name()));
+        self.config
+            .set("backdrop", json!(self.settings_backdrop.name()));
         let lang_value = self.settings_lang.config_value().to_string();
         if get_str(&self.config, "language").as_deref() != Some(lang_value.as_str()) {
             self.config.set("language", json!(lang_value));
@@ -298,6 +339,9 @@ impl Anime4KPlayerApp {
         self.mpv.set_svp(self.settings_svp);
         self.apply_style(ctx);
         self.apply_theme(ctx);
+        // The material itself is applied on the next frame (see
+        // `sync_backdrop`): this path has no window handle.
+        self.backdrop_dirty = true;
         self.flush_config();
     }
 }

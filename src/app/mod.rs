@@ -23,9 +23,27 @@ impl eframe::App for Anime4KPlayerApp {
         self.save_on_exit();
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    /// Background of the window itself. Transparent under a backdrop
+    /// material so the DWM material (Mica/Acrylic) shows through; opaque
+    /// otherwise. The window is always created with an alpha channel on
+    /// Windows (see `main.rs`), so this must never return a translucent
+    /// color outside backdrop mode or the desktop would leak through.
+    fn clear_color(&self, visuals: &egui::Visuals) -> [f32; 4] {
+        if self.active_backdrop.enabled() {
+            [0.0, 0.0, 0.0, 0.0]
+        } else {
+            let c = visuals.panel_fill.to_normalized_gamma_f32();
+            [c[0], c[1], c[2], 1.0]
+        }
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let frame_start = Instant::now();
+        // Native window state first: picks the saved backdrop up after
+        // startup/settings and is a no-op while nothing changed.
+        self.sync_backdrop(&*frame);
+        self.sync_backdrop_glass(&*frame, &ctx);
         // Time-gated snapshot first: everything below reads cached state,
         // so repaint storms (every video frame) cost zero mpv round-trips.
         self.poll_mpv();

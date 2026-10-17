@@ -10,6 +10,7 @@ mod fonts;
 mod formats;
 mod i18n;
 mod icon;
+mod mica;
 mod mpv;
 mod player;
 mod playlist;
@@ -101,6 +102,14 @@ fn main() -> eframe::Result<()> {
         .with_title(APP_NAME)
         .with_min_inner_size([800.0, 600.0])
         .with_icon(load_app_icon());
+    // Windows: create the window with an alpha channel so the Mica/Acrylic
+    // backdrop (settings → Backdrop, module `mica`) can be switched on and
+    // off at runtime — winit transparency is fixed at creation. Without a
+    // material the app clears opaque (see `Anime4KPlayerApp::clear_color`),
+    // so the extra channel alone changes nothing on screen.
+    if cfg!(windows) {
+        viewport = viewport.with_transparent(true);
+    }
     if maximized {
         // Maximized restore must NOT carry an explicit size/position: the
         // stored W/H is the last *windowed* rect, and combining it with

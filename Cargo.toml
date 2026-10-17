@@ -34,7 +34,13 @@ rfd = "0.17.2"
 sys-locale = "0.3.2"
 arboard = "3.7.0"
 dark-light = "3.0.0"
+# Raw window handle of the eframe window, for the DWM Mica/Acrylic backdrop.
+raw-window-handle = "0.6.2"
 libmpv2 = { version = "6.0.0", optional = true }
+
+# DWM window materials (Mica/Acrylic) behind the window (see `src/mica.rs`).
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi"] }
 
 [dev-dependencies]
 tempfile = "3.27.0"

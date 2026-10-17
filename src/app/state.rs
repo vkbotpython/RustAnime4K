@@ -4,7 +4,7 @@ use crate::config::ConfigManager;
 use crate::i18n::{self, Lang};
 use crate::mpv::{MpvBackend, Track};
 use crate::player::PlayerState;
-use crate::theme::{self, ColorScheme, Palette};
+use crate::theme::{self, Backdrop, ColorScheme, Palette};
 #[cfg(feature = "video")]
 use crate::video::VideoRenderer;
 use serde_json::{Value, json};
@@ -22,6 +22,10 @@ pub const TIME_SCALE: f64 = 10.0;
 
 /// Idle delay before the cursor auto-hides in fullscreen.
 pub(crate) const FULLSCREEN_CURSOR_IDLE: Duration = Duration::from_millis(2000);
+/// Delay between the DWM material attribute and the glass pass that makes
+/// the backdrop sample actual content (see `App::sync_backdrop_glass`):
+/// both in one go races DWM's attribute commit and the material stays flat.
+pub(crate) const GLASS_APPLY_DELAY_MS: u64 = 2500;
 /// Bottom strip (px) that reveals the control panel in fullscreen.
 pub(crate) const FULLSCREEN_BOTTOM_ZONE: f32 = 140.0;
 /// Right strip (px) that reveals the playlist in fullscreen.
@@ -91,6 +95,7 @@ pub struct Anime4KPlayerApp {
     pub(crate) settings_palette: Palette,
     pub(crate) settings_style: String,
     pub(crate) settings_scheme: ColorScheme,
+    pub(crate) settings_backdrop: Backdrop,
 
     // Anime4K preset offer dialog drafts (quality/mode to apply on choice).
     pub(crate) preset_offer_quality: String,
@@ -108,6 +113,19 @@ pub struct Anime4KPlayerApp {
 
     /// Last disk flush of the window geometry (see `track_window_geometry`).
     pub(crate) last_window_save: Option<Instant>,
+
+    /// Backdrop material currently pushed to the window (see
+    /// `sync_backdrop`); `clear_color` reads it every frame.
+    pub(crate) active_backdrop: Backdrop,
+    /// Set when the saved backdrop/scheme may have changed (startup,
+    /// settings save); the DWM call itself happens on the next frame.
+    pub(crate) backdrop_dirty: bool,
+    /// When to run the deferred glass pass of a backdrop apply (see
+    /// `sync_backdrop_glass`); `None` when no material is being applied.
+    pub(crate) backdrop_glass_due: Option<Instant>,
+    /// A failed backdrop apply (Windows 10 / pre-22H2 Windows 11) is
+    /// reported once, then the window simply stays opaque.
+    pub(crate) backdrop_warned: bool,
 
     /// Last `mpv.log` size-cap check (see `crate::mpv::cap_mpv_log`).
     #[cfg(feature = "video")]
@@ -370,6 +388,9 @@ impl Anime4KPlayerApp {
                     .as_deref()
                     .unwrap_or("System"),
             ),
+            settings_backdrop: Backdrop::from_name(
+                get_str(&config, "backdrop").as_deref().unwrap_or("Off"),
+            ),
             preset_offer_quality: "HQ".to_string(),
             preset_offer_mode: "A".to_string(),
             preset_offer_dont_ask: false,
@@ -378,6 +399,10 @@ impl Anime4KPlayerApp {
             last_mouse_time: Instant::now(),
             click_play_armed_at: None,
             last_window_save: None,
+            active_backdrop: Backdrop::Off,
+            backdrop_dirty: true,
+            backdrop_glass_due: None,
+            backdrop_warned: false,
             #[cfg(feature = "video")]
             last_log_cap: None,
             eof_handled: false,
@@ -408,6 +433,10 @@ impl Anime4KPlayerApp {
         };
         app.apply_style(&cc.egui_ctx);
         app.apply_theme(&cc.egui_ctx);
+        // Apply the saved material right away: the window (and its handle)
+        // exists before `App::new` runs, so the first painted frame already
+        // sits on the Mica/Acrylic backdrop.
+        app.sync_backdrop(cc);
         app.restore_startup(cli_arg);
         app.refresh_title(&cc.egui_ctx);
         app
@@ -486,12 +515,92 @@ impl Anime4KPlayerApp {
     }
 
     pub(crate) fn apply_theme(&self, ctx: &egui::Context) {
-        // Palette base name + OS light/dark scheme.
-        theme::apply(ctx, self.settings_palette, self.settings_scheme.is_dark());
+        // Palette base name + OS light/dark scheme + window material.
+        theme::apply(
+            ctx,
+            self.settings_palette,
+            self.settings_scheme.is_dark(),
+            self.settings_backdrop.effective(),
+        );
     }
 
     pub(crate) fn apply_style(&self, ctx: &egui::Context) {
         crate::theme::style::apply(ctx, &self.settings_style);
+    }
+
+    /// Saved `backdrop` value: runtime behavior follows the saved config,
+    /// not the unsaved settings-dialog draft (see `fixed_panel`).
+    pub(crate) fn backdrop(&self) -> Backdrop {
+        Backdrop::from_name(
+            get_str(&self.config, "backdrop")
+                .as_deref()
+                .unwrap_or("Off"),
+        )
+    }
+
+    /// Saved `colorScheme` resolved to concrete dark/light. Drives the
+    /// caption colors and the Mica light/dark variant while a material is on.
+    pub(crate) fn scheme_dark(&self) -> bool {
+        ColorScheme::from_name(
+            get_str(&self.config, "colorScheme")
+                .as_deref()
+                .unwrap_or("System"),
+        )
+        .is_dark()
+    }
+
+    /// Mirrors the saved backdrop/scheme onto the native window (DWM
+    /// material, see `crate::mica`). Called every frame, but the DWM call
+    /// only happens while `backdrop_dirty` (startup, settings save) — the
+    /// OS color scheme is not re-detected per frame.
+    pub(crate) fn sync_backdrop(&mut self, window: &impl raw_window_handle::HasWindowHandle) {
+        if !self.backdrop_dirty {
+            return;
+        }
+        self.backdrop_dirty = false;
+        let backdrop = self.backdrop().effective();
+        self.active_backdrop = backdrop;
+        if let Err(err) = crate::mica::apply(window, backdrop, self.scheme_dark()) {
+            self.active_backdrop = Backdrop::Off;
+            self.backdrop_glass_due = None;
+            if !self.backdrop_warned {
+                self.backdrop_warned = true;
+                eprintln!("window backdrop unavailable ({err:#}), keeping the window opaque");
+            }
+            return;
+        }
+        // The half that turns winit's empty-region blur-behind into the
+        // classic glass state must not race the attribute it just changed
+        // (see `crate::mica`); it runs a moment later, off the next frames.
+        self.backdrop_glass_due = (backdrop != Backdrop::Off)
+            .then(|| Instant::now() + Duration::from_millis(GLASS_APPLY_DELAY_MS));
+    }
+
+    /// Second half of `sync_backdrop`: enables the classic "glass" once the
+    /// attribute change has had a few frames to settle. Also asks for the
+    /// frame that performs the pass, since an idle app repaints nothing.
+    pub(crate) fn sync_backdrop_glass(
+        &mut self,
+        window: &impl raw_window_handle::HasWindowHandle,
+        ctx: &egui::Context,
+    ) {
+        let Some(due) = self.backdrop_glass_due else {
+            return;
+        };
+        let now = Instant::now();
+        if now < due {
+            ctx.request_repaint_after(due - now);
+            return;
+        }
+        self.backdrop_glass_due = None;
+        if let Err(err) = crate::mica::enable_glass(window) {
+            // Material shows as a flat tint without the glass; rare enough
+            // to fold into the same once-only report.
+            if !self.backdrop_warned {
+                self.backdrop_warned = true;
+                eprintln!("window glass pass failed ({err:#}), backdrop may look flat");
+            }
+        }
     }
 
     /// Saved `fixedControlPanel` value (runtime behavior follows the saved
