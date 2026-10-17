@@ -37,13 +37,19 @@ impl eframe::App for Anime4KPlayerApp {
         }
     }
 
-    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+    /// Runs on every callback, including frames where the window is hidden:
+    /// eframe skips `ui` for minimized/occluded windows but still calls
+    /// `logic`. The backdrop needs that — DWM may drop the material on
+    /// minimize, so the re-apply on restore must see the transition while
+    /// hidden (see `sync_backdrop`).
+    fn logic(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        self.sync_backdrop(&*frame);
+        self.sync_backdrop_glass(&*frame, ctx);
+    }
+
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         let frame_start = Instant::now();
-        // Native window state first: picks the saved backdrop up after
-        // startup/settings and is a no-op while nothing changed.
-        self.sync_backdrop(&*frame);
-        self.sync_backdrop_glass(&*frame, &ctx);
         // Time-gated snapshot first: everything below reads cached state,
         // so repaint storms (every video frame) cost zero mpv round-trips.
         self.poll_mpv();

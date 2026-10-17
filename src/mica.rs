@@ -157,6 +157,30 @@ pub fn enable_glass(_window: &impl raw_window_handle::HasWindowHandle) -> anyhow
     Ok(())
 }
 
+/// Whether the window is currently minimized (`IsIconic`). DWM may drop the
+/// blur-behind half of the material on minimize, so `sync_backdrop` uses this
+/// to re-run the apply sequence once the window comes back.
+#[cfg(windows)]
+pub fn is_minimized(window: &impl raw_window_handle::HasWindowHandle) -> Option<bool> {
+    use raw_window_handle::RawWindowHandle;
+    use windows_sys::Win32::UI::WindowsAndMessaging::IsIconic;
+
+    let handle = window.window_handle().ok()?.as_raw();
+    let RawWindowHandle::Win32(win32) = handle else {
+        return None;
+    };
+    let hwnd = win32.hwnd.get() as windows_sys::Win32::Foundation::HWND;
+    // SAFETY: `hwnd` belongs to a live window (the handle was just obtained
+    // from it); `IsIconic` only reads window state.
+    Some(unsafe { IsIconic(hwnd) != 0 })
+}
+
+/// Always `None`: nothing to repair outside Windows.
+#[cfg(not(windows))]
+pub fn is_minimized(_window: &impl raw_window_handle::HasWindowHandle) -> Option<bool> {
+    None
+}
+
 /// No-op elsewhere: Mica/Acrylic are Windows materials and the setting is
 /// hidden in the settings dialog on other platforms.
 #[cfg(not(windows))]

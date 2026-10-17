@@ -26,6 +26,11 @@ pub(crate) const FULLSCREEN_CURSOR_IDLE: Duration = Duration::from_millis(2000);
 /// the backdrop sample actual content (see `App::sync_backdrop_glass`):
 /// both in one go races DWM's attribute commit and the material stays flat.
 pub(crate) const GLASS_APPLY_DELAY_MS: u64 = 2500;
+/// While a material is active the app asks for a repaint at least this
+/// often, so the minimize/restore detection in `sync_backdrop` keeps
+/// receiving frames even when the app is idle or hidden (eframe throttles
+/// hidden windows; see `App::sync_backdrop_glass`).
+pub(crate) const BACKDROP_HEARTBEAT_MS: u64 = 1000;
 /// Bottom strip (px) that reveals the control panel in fullscreen.
 pub(crate) const FULLSCREEN_BOTTOM_ZONE: f32 = 140.0;
 /// Right strip (px) that reveals the playlist in fullscreen.
@@ -123,6 +128,10 @@ pub struct Anime4KPlayerApp {
     /// When to run the deferred glass pass of a backdrop apply (see
     /// `sync_backdrop_glass`); `None` when no material is being applied.
     pub(crate) backdrop_glass_due: Option<Instant>,
+    /// Last observed minimize state of the window (`None` on non-Windows).
+    /// A `true` → `false` edge means "restored from minimized", after which
+    /// DWM may have dropped the material, so it is applied again.
+    pub(crate) backdrop_minimized: Option<bool>,
     /// A failed backdrop apply (Windows 10 / pre-22H2 Windows 11) is
     /// reported once, then the window simply stays opaque.
     pub(crate) backdrop_warned: bool,
@@ -402,6 +411,7 @@ impl Anime4KPlayerApp {
             active_backdrop: Backdrop::Off,
             backdrop_dirty: true,
             backdrop_glass_due: None,
+            backdrop_minimized: None,
             backdrop_warned: false,
             #[cfg(feature = "video")]
             last_log_cap: None,
@@ -551,9 +561,23 @@ impl Anime4KPlayerApp {
 
     /// Mirrors the saved backdrop/scheme onto the native window (DWM
     /// material, see `crate::mica`). Called every frame, but the DWM call
-    /// only happens while `backdrop_dirty` (startup, settings save) — the
-    /// OS color scheme is not re-detected per frame.
+    /// only happens while `backdrop_dirty` (startup, settings save, window
+    /// restored from minimized) — the OS color scheme is not re-detected per
+    /// frame.
     pub(crate) fn sync_backdrop(&mut self, window: &impl raw_window_handle::HasWindowHandle) {
+        // DWM may drop the blur-behind half of the material when the window
+        // is minimized; a restore therefore re-runs the full apply sequence.
+        // (`is_minimized` is always `None` on non-Windows: no-op there.)
+        let minimized = crate::mica::is_minimized(window);
+        if minimized == Some(false)
+            && self.backdrop_minimized == Some(true)
+            && self.active_backdrop != Backdrop::Off
+        {
+            self.backdrop_dirty = true;
+        }
+        if minimized.is_some() {
+            self.backdrop_minimized = minimized;
+        }
         if !self.backdrop_dirty {
             return;
         }
@@ -584,6 +608,12 @@ impl Anime4KPlayerApp {
         window: &impl raw_window_handle::HasWindowHandle,
         ctx: &egui::Context,
     ) {
+        // The minimize detection above needs a frame *while* the window is
+        // minimized, which an idle app would never get; a slow heartbeat
+        // supplies one (cheap, and only ever active with a material on).
+        if self.active_backdrop != Backdrop::Off {
+            ctx.request_repaint_after(Duration::from_millis(BACKDROP_HEARTBEAT_MS));
+        }
         let Some(due) = self.backdrop_glass_due else {
             return;
         };
