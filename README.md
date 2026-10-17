@@ -15,7 +15,7 @@
 
 # 🎬 Anime4K Player
 
-![1](https://i.ibb.co/mrvHF96h/1.png)
+![1](https://i.ibb.co/3m4gp6dK/1.png)
 
 Видеоплеер с улучшением качества рисованного изображения с помощью
 высокопроизводительного алгоритма
@@ -25,7 +25,7 @@
 ## ✨ Возможности
 
 - Открытие файла / URL / папки, плейлист, drag & drop (субтитры подхватываются сами,
-  symlink открывается как URL), заголовок окна = имя файла
+  symlink открывается как URL), заголовок окна = `имя - Anime4K Player`
 - Пресеты Anime4K: качества S/M/L/VL/UL × режимы A/B/C/A+A/B+B/C+A + набор HQ,
   генератор строки `glsl-shaders=` для Android, структурированная справка (EN/RU):
   карточки режимов, таблицы конвейеров и шейдеров, рекомендации
@@ -36,14 +36,16 @@
 - Воспроизведение: играть/пауза, **ползунок перемотки во всю ширину окна**
   (точность 0.1 с), скорость 0.25–3.0 (12 ступеней в меню), масштаб ±0.01,
   громкость 100/150%, меню аудио- и субтитровых дорожек + подключение внешних
-  файлов, строка медиа-инфо (кодек, разрешение, FPS, потери кадров, HW-декодер),
-  автопереход к следующему файлу в конце, поддержка URL через `ytdl`
+  файлов, строка медиа-инфо (пресет, кодек, разрешение, FPS, потери кадров,
+  HW-декодер, живые метрики UI/V и CACHE-WAIT), автопереход к следующему
+  файлу в конце, поддержка URL через `ytdl`
 - Мышь: клик по видео — играть/пауза, дабл-клик — fullscreen, правый клик —
   контекстное меню. В fullscreen панели и курсор автоматически прячутся
   (если не включена фиксированная панель)
 - Горячие клавиши (см. таблицу ниже)
 - Режим SVP (`mpvpipe` + `auto-copy`), задержка звука −100…+100 с (шаг 0.01),
-  скриншоты JPEG q100 в выбранную папку, диагностика `mpv.log` рядом с exe
+  скриншоты JPEG в выбранную папку (q90 по умолчанию; q100 — параметром
+  запуска `screenshot-jpeg-quality`), диагностика `mpv.log` рядом с exe
   (ротация 512 КБ)
 - Аппаратное декодирование (`hwdec=auto-safe` с откатом на софт) — в релизных
   сборках libmpv уже включён: на Linux лежит в `lib/` рядом с бинарником,
@@ -109,6 +111,8 @@ src/
   i18n.rs      локализация
   formats.rs   расширения медиафайлов
   playlist.rs  сканирование папок
+  icon.rs      PNG-иконка приложения (окно + «О программе»)
+  fonts.rs     фоллбэки шрифтов (Hack для стрелок/символов)
   reference/   справка Anime4K (EN/RU)
     mod.rs       реэкспорты + точка входа справки
     view.rs      секции: шапка, выбор, режимы, тонкая настройка, советы
@@ -119,18 +123,22 @@ src/
 build.rs       иконка exe через winres (только Windows)
 build.ps1      локальная сборка Windows (проверки + release + dist + -Installer/-Zip)
 build.sh       локальная сборка Linux (проверки + release + dist + .deb/.rpm)
-assets/        shaders/ (49 .glsl) + images/ (иконка, play) + docs/ (2 .txt) +
-               favicon.ico + i18n/*.json (25 языков)
+assets/        shaders/ (49 .glsl) + images/ (иконка, play, icons/*.svg) +
+               docs/ (2 .txt) + favicon.ico + i18n/*.json (25 языков)
 packaging/     windows/installer.iss (Inno Setup: лицензия, каталог, ярлыки) +
                linux/{io.github.avencores.Anime4KPlayer.desktop, mkpackages.sh (.deb/.rpm)}
-.cargo/config.toml + mpvlib-local/mpv.lib  единственный источник `-L` для линковки libmpv
+.cargo/config.toml  флаги `-L mpvlib-local` для линковки libmpv — единственный
+                    источник у скриптов и ручных вызовов cargo (каталог
+                    локальный, в .gitignore: mpv.lib генерируется из DLL)
 .github/       workflows/ci.yml + release.yml
 ```
 
-Зависимости сверх eframe/egui: `arboard` (кнопки Paste из буфера обмена),
+Зависимости сверх eframe/egui: `serde`/`serde_json` (JSON-конфиг), `dirs`
+(пути конфига), `anyhow` (ошибки), `rfd` (нативные диалоги файлов),
+`sys-locale` (язык системы), `arboard` (кнопки Paste из буфера обмена),
 `dark-light` (системная тема), `egui_extras/image` (PNG в «О программе»),
 `raw-window-handle` (HWND окна для DWM), `windows-sys` (Mica/Acrylic-фон),
-`winres` (иконка exe, build).
+`winres` (иконка exe, build), `tempfile` (dev, тесты).
 
 ## ⚙️ Конфиг (`config.json`)
 
@@ -195,21 +203,23 @@ sudo dnf install ./anime4k-player-linux-x86_64.rpm  # Fedora
 
 Windows, фича `video`: для линковки используется `mpvlib-local/mpv.lib`
 (путь `-L` задан в `.cargo/config.toml`, поэтому одинаков у скриптов и у
-ручных вызовов cargo — это сохраняет общий кэш в `target/`),
-а `libmpv-2.dll` ищется
-в `./libmpv-2.dll`, `./mpvlib-local/`, `./target/release/` или указывается
-через `-MpvDll <путь>`. Готовый пакет лежит в `dist/anime4k-player/` — его
-можно запускать прямо оттуда.
+ручных вызовов cargo — это сохраняет общий кэш в `target/`; если `mpv.lib`
+ещё нет, `build.ps1` соберёт его из найденной DLL через `dumpbin`/`lib.exe`),
+а `libmpv-2.dll` ищется по `-MpvDll <путь>`, в корне репо, `mpvlib-local/`,
+`target/release/`, `target/debug/`, `dist/anime4k-player/`, установленных
+`mpv`/`mpv.net` и каталогах `PATH`. Готовый пакет лежит в
+`dist/anime4k-player/` — его можно запускать прямо оттуда.
 
 ```powershell
-cargo test            # 43 юнит-теста (системные зависимости не нужны)
-cargo run             # debug-сборка, mock-бэкенд (UI полностью работает, без декодирования)
-cargo run -- <файл>   # открыть файл/папку/URL напрямую
+cargo test                   # 57 юнит-тестов, mock-бэкенд (системные зависимости не нужны)
+cargo test --features video  # 58 тестов (линковка через mpvlib-local/mpv.lib)
+cargo run                    # debug-сборка, mock-бэкенд (UI полностью работает, без декодирования)
+cargo run -- <файл>          # открыть файл/папку/URL напрямую
 ```
 
 ### ▶️ С настоящим воспроизведением (фича `video`)
 
-Релизные сборки с GitLab уже идут с фичей `video`: настоящее декодирование
+Релизные сборки уже идут с фичей `video`: настоящее декодирование
 через `libmpv` с аппаратным ускорением (`hwdec=auto-safe`), рендер через
 OpenGL render-контекст на поверхность egui. Библиотека едет вместе с плеером:
 на Linux — `libmpv.so` и ffmpeg-цепочка в каталоге `lib/` (RPATH `$ORIGIN`),
@@ -225,13 +235,14 @@ sudo apt install libmpv-dev
 cargo run --features video
 ```
 
-Windows: нужна пара import-библиотека + DLL с именами `mpv.lib` / `mpv.dll`
-(`libmpv2-sys` линкует `cargo:rustc-link-lib=mpv`). Официальные сборки mpv
-поставляют `libmpv-2.dll`, поэтому либо сгенерируй import-библиотеку из неё
-(так делает наш `release.yml`: `dumpbin /exports` → `.def` → `lib.exe`),
-либо возьми пакет с `mpv.lib` (например, vcpkg), положи `mpv.lib` в
-`mpvlib-local/` (этот путь уже прописан в `.cargo/config.toml`, ничего
-дополнительно выставлять не нужно), затем:
+Windows: нужны import-библиотека (`libmpv2-sys` линкует
+`cargo:rustc-link-lib=mpv`) и `libmpv-2.dll` для запуска. Официальные
+сборки mpv поставляют только DLL, поэтому `mpv.lib` генерируется из неё
+(`dumpbin /exports` → `.def` → `lib.exe`) — так делают `release.yml` и
+`build.ps1`. Положи `mpv.lib` в `mpvlib-local/` (этот путь уже прописан в
+`.cargo/config.toml`, ничего дополнительно выставлять не нужно) — либо
+просто запусти `.\build.ps1`: он найдёт DLL и соберёт `mpv.lib` сам
+(`-DownloadMpv` — ещё и скачает mpv-dev). Затем:
 
 ```powershell
 cargo run --features video
@@ -279,7 +290,7 @@ audio-delay=0.15
   и `anime4k-player-Linux-rpm` (`anime4k-player-linux-x86_64.rpm`,
   `sudo dnf install ./....rpm`).
 - `release.yml`: dormant, срабатывает только по тегу `v*` (сборка релизных
-  бинарников + Inno Setup + публикация GitLab Release).
+  бинарников + Inno Setup + публикация релиза).
 
 # 📜 Лицензия
 
