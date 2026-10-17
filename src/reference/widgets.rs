@@ -49,17 +49,14 @@ pub(crate) fn card(ui: &mut egui::Ui, fill: Color32, add: impl FnOnce(&mut egui:
     egui::Frame::new()
         .fill(fill)
         .inner_margin(10.0)
-        .corner_radius(8.0)
-        .stroke(Stroke::new(
-            1.0,
-            ui.visuals().widgets.noninteractive.bg_stroke.color,
-        ))
+        .corner_radius(crate::theme::CARD_CORNER_RADIUS)
+        .stroke(Stroke::new(1.0, crate::theme::card_stroke(ui)))
         .show(ui, add);
     ui.add_space(6.0);
 }
 
 pub(crate) fn card_fill(ui: &egui::Ui) -> Color32 {
-    crate::theme::card_fill_for(ui.visuals().window_fill)
+    crate::theme::card_fill_for(ui.visuals().window_fill, ui.visuals().dark_mode)
 }
 
 pub(crate) fn note_fill(ui: &egui::Ui) -> Color32 {

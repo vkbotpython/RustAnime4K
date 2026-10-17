@@ -51,8 +51,8 @@ impl Anime4KPlayerApp {
                         egui::RichText::new(format!(" v{VERSION} "))
                             .size(13.0)
                             .strong()
-                            .color(egui::Color32::WHITE)
-                            .background_color(ui.visuals().hyperlink_color),
+                            .color(crate::theme::on_accent_of(ui))
+                            .background_color(crate::theme::accent(ui)),
                     );
                     ui.add_space(2.0);
                     ui.label(

@@ -32,28 +32,26 @@ pub(crate) fn card(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui)) {
     egui::Frame::new()
         .fill(card_fill(ui))
         .inner_margin(10.0)
-        .corner_radius(8.0)
-        .stroke(Stroke::new(
-            1.0,
-            ui.visuals().widgets.noninteractive.bg_stroke.color,
-        ))
+        .corner_radius(crate::theme::CARD_CORNER_RADIUS)
+        .stroke(Stroke::new(1.0, crate::theme::card_stroke(ui)))
         .show(ui, add);
     ui.add_space(6.0);
 }
 
-/// Подложка карточки: сдвиг от `window_fill` текущей палитры (см.
-/// `crate::theme::card_fill_for`). Работает в обеих темах.
+/// Подложка карточки: светлый слой WinUI поверх окна текущей палитры
+/// (см. `crate::theme::card_fill_for`). Работает в обеих темах.
 pub(crate) fn card_fill(ui: &egui::Ui) -> Color32 {
-    crate::theme::card_fill_for(ui.visuals().window_fill)
+    crate::theme::card_fill_for(ui.visuals().window_fill, ui.visuals().dark_mode)
 }
 
 /// Однострочное поле ввода на всю ширину с подсказкой-плейсхолдером.
 pub(crate) fn text_field(ui: &mut egui::Ui, text: &mut String, hint_text: &str) {
-    ui.add(
+    let resp = ui.add(
         egui::TextEdit::singleline(text)
             .hint_text(hint_text)
             .desired_width(f32::INFINITY),
     );
+    crate::theme::focus_underline(ui, &resp);
 }
 
 /// Нижняя панель кнопок: разделитель + выравнивание вправо.

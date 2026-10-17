@@ -115,11 +115,8 @@ impl Anime4KPlayerApp {
                 egui::Frame::new()
                     .fill(card_fill(ui))
                     .inner_margin(10.0)
-                    .corner_radius(8.0)
-                    .stroke(egui::Stroke::new(
-                        1.0,
-                        ui.visuals().widgets.noninteractive.bg_stroke.color,
-                    ))
+                    .corner_radius(crate::theme::CARD_CORNER_RADIUS)
+                    .stroke(egui::Stroke::new(1.0, crate::theme::card_stroke(ui)))
                     .show(ui, |ui| {
                         field_title(ui, "mpv.conf");
                         // Fill, don't cap: the scroll area takes exactly the

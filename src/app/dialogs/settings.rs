@@ -131,8 +131,8 @@ impl Anime4KPlayerApp {
                     ui.add_space(2.0);
                     hint(ui, language_label);
                     ui.add_space(4.0);
-                    ui.checkbox(&mut self.settings_open_last, open_last_label);
-                    ui.checkbox(&mut self.settings_pos_last, pos_last_label);
+                    crate::theme::checkbox(ui, &mut self.settings_open_last, open_last_label);
+                    crate::theme::checkbox(ui, &mut self.settings_pos_last, pos_last_label);
                 });
                 // --- воспроизведение ---
                 card(ui, |ui| {
@@ -145,10 +145,10 @@ impl Anime4KPlayerApp {
                             "Playback"
                         },
                     );
-                    ui.checkbox(&mut self.settings_volume_plus, volume_plus_label);
-                    ui.checkbox(&mut self.settings_svp, svp_label);
-                    ui.checkbox(&mut self.settings_fixed_panel, fixed_label);
-                    ui.checkbox(&mut self.settings_ask_preset, ask_preset_label);
+                    crate::theme::checkbox(ui, &mut self.settings_volume_plus, volume_plus_label);
+                    crate::theme::checkbox(ui, &mut self.settings_svp, svp_label);
+                    crate::theme::checkbox(ui, &mut self.settings_fixed_panel, fixed_label);
+                    crate::theme::checkbox(ui, &mut self.settings_ask_preset, ask_preset_label);
                     ui.add_space(4.0);
                     ui.horizontal(|ui| {
                         ui.label(offset_label);

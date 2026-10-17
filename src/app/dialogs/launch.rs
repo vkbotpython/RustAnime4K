@@ -76,12 +76,13 @@ impl Anime4KPlayerApp {
                 });
                 ui.add_space(4.0);
                 let avail = ui.available_size();
-                ui.add_sized(
+                let resp = ui.add_sized(
                     egui::vec2(avail.x, avail.y.max(120.0)),
                     egui::TextEdit::multiline(&mut self.launch_params_text)
                         .font(egui::TextStyle::Monospace)
                         .hint_text("name=value"),
                 );
+                crate::theme::focus_underline(ui, &resp);
             });
         if cancelled {
             self.launch_params_text = get_str(&self.config, "launchParameters").unwrap_or_default();

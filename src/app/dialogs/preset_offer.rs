@@ -131,7 +131,7 @@ impl Anime4KPlayerApp {
                         );
                     });
                 });
-                ui.checkbox(&mut self.preset_offer_dont_ask, dont_ask_label);
+                crate::theme::checkbox(ui, &mut self.preset_offer_dont_ask, dont_ask_label);
                 bottom_bar(ui, |ui| {
                     if ui.button(apply_label).clicked() {
                         applied = true;

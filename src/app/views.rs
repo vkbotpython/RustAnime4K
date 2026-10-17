@@ -542,14 +542,15 @@ impl Anime4KPlayerApp {
                 ui.monospace(self.time_dur_text.as_str());
                 ui.spacing_mut().slider_width = ui.available_width();
                 let hover = format!("{} / {}", self.time_pos_text, self.time_dur_text);
-                let resp = ui
-                    .add(
+                let resp = crate::theme::slider(ui, |ui| {
+                    ui.add(
                         egui::Slider::new(&mut slider_val, 0.0..=max)
                             .show_value(false)
                             .trailing_fill(true)
                             .step_by(0.5),
                     )
-                    .on_hover_text(hover);
+                    .on_hover_text(hover)
+                });
                 // Seek on real gestures only — NEVER on bare `changed()`.
                 // With `step_by` the slider rounds the live `time-pos`
                 // back into `slider_val` every frame (`slider.rs`:
@@ -619,9 +620,10 @@ impl Anime4KPlayerApp {
             let vmax = self.player.max_volume_self();
             // Hover still formats per frame (1 alloc), but the visible label
             // below is cached; `vol` only changes at 0.7Hz + drags.
-            let vol_resp = ui
-                .add(egui::Slider::new(&mut vol, 0..=vmax).show_value(false))
-                .on_hover_text(format!("{}: {}%", self.t("Volume level"), vol));
+            let vol_resp = crate::theme::slider(ui, |ui| {
+                ui.add(egui::Slider::new(&mut vol, 0..=vmax).show_value(false))
+                    .on_hover_text(format!("{}: {}%", self.t("Volume level"), vol))
+            });
             if vol_resp.changed() {
                 self.player.set_volume(&*self.mpv, vol);
                 // Optimistic: don't wait for the next poll tick.
