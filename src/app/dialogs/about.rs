@@ -164,18 +164,40 @@ impl Anime4KPlayerApp {
                                 .background_color(egui::Color32::from_rgb(46, 125, 50)),
                         );
                         ui.monospace(DONATE_CARD_SPACED);
-                        if ui.button(copy_label).clicked() {
+
+                        // После клика подпись кнопки сменяется на «Скопировано».
+                        // Ширину кнопки фиксируем по самой длинной подписи:
+                        // иначе строка доната (а с ней и окно) дёргалась бы
+                        // при появлении надписи.
+                        let button_font = egui::TextStyle::Button.resolve(ui.style());
+                        let label_width = |text: &str| {
+                            ui.painter()
+                                .layout_no_wrap(
+                                    text.to_owned(),
+                                    button_font.clone(),
+                                    egui::Color32::WHITE,
+                                )
+                                .size()
+                                .x
+                        };
+                        let copy_button_width = label_width(copy_label)
+                            .max(label_width(copied_label))
+                            + 2.0 * ui.spacing().button_padding.x
+                            + 2.0;
+                        let copy_button = if copied {
+                            egui::Button::new(
+                                egui::RichText::new(copied_label)
+                                    .strong()
+                                    .color(egui::Color32::from_rgb(46, 125, 50)),
+                            )
+                        } else {
+                            egui::Button::new(copy_label)
+                        }
+                        .min_size(egui::vec2(copy_button_width, 0.0));
+                        if ui.add(copy_button).clicked() {
                             // Bank apps paste card numbers without spaces.
                             ui.ctx().copy_text(DONATE_CARD_PLAIN.to_string());
                             self.about_copied_at = Some(Instant::now());
-                        }
-                        if copied {
-                            ui.label(
-                                egui::RichText::new(copied_label)
-                                    .strong()
-                                    .size(12.5)
-                                    .color(egui::Color32::from_rgb(46, 125, 50)),
-                            );
                         }
                     });
                 });
