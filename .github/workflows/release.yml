@@ -193,7 +193,10 @@ jobs:
         shell: bash
         run: |
           ls -la release-assets
+          # В этом job нет actions/checkout, поэтому .git отсутствует и gh не
+          # может вывести репозиторий из git remote — указываем его явно.
           gh release create "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
             --title "${{ github.ref_name }}" \
             --generate-notes \
             release-assets/*
