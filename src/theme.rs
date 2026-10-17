@@ -157,6 +157,11 @@ pub mod style {
     /// shrunk for egui's denser rows). `indent` keeps the egui invariant
     /// `button_padding.x + icon_width + icon_spacing`.
     pub const CONTROL_HEIGHT: f32 = 24.0;
+    /// Slider row height. egui derives the handle radius from the row
+    /// (`height / 2.5`), so sliders get their own compact row: a transport
+    /// or volume thumb should not be as tall as a button (~13px instead of
+    /// the 19px ball a control-height row would produce).
+    pub const SLIDER_HEIGHT: f32 = 16.0;
     pub const SLIDER_RAIL_HEIGHT: f32 = 4.0;
     pub const ICON_WIDTH: f32 = 16.0;
     pub const ICON_WIDTH_INNER: f32 = 10.0;
@@ -564,6 +569,10 @@ pub fn checkbox(ui: &mut egui::Ui, checked: &mut bool, label: &str) -> egui::Res
 pub fn slider<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
     let accent = accent(ui);
     ui.scope(|ui| {
+        // egui sizes the handle from the row height (radius = height / 2.5).
+        // A compact row keeps the thumb from covering the position like a
+        // button-sized ball would on a transport bar.
+        ui.spacing_mut().interact_size.y = style::SLIDER_HEIGHT;
         ui.visuals_mut().widgets.hovered.bg_fill = accent_shade(accent, 0.9);
         add(ui)
     })
@@ -759,6 +768,15 @@ mod tests {
             v.widgets.inactive.bg_fill,
             egui::Color32::from_white_alpha(0x8B)
         );
+    }
+
+    #[test]
+    fn slider_uses_a_compact_handle_row() {
+        egui::__run_test_ui(|ui| {
+            slider(ui, |ui| {
+                assert_eq!(ui.spacing().interact_size.y, style::SLIDER_HEIGHT);
+            });
+        });
     }
 
     #[test]
