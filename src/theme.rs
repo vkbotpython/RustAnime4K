@@ -756,6 +756,22 @@ mod tests {
     }
 
     #[test]
+    fn backdrop_materials_are_windows_only() {
+        // Mica/Acrylic are DWM materials: on other platforms a config value
+        // synced from Windows must never make the window translucent.
+        if cfg!(windows) {
+            assert_eq!(Backdrop::Mica.effective(), Backdrop::Mica);
+            assert_eq!(Backdrop::MicaAlt.effective(), Backdrop::MicaAlt);
+            assert_eq!(Backdrop::Acrylic.effective(), Backdrop::Acrylic);
+        } else {
+            for material in [Backdrop::Mica, Backdrop::MicaAlt, Backdrop::Acrylic] {
+                assert_eq!(material.effective(), Backdrop::Off);
+            }
+        }
+        assert_eq!(Backdrop::Off.effective(), Backdrop::Off);
+    }
+
+    #[test]
     fn apply_writes_both_theme_slots() {
         let ctx = egui::Context::default();
         ctx.set_theme(egui::ThemePreference::Dark);
